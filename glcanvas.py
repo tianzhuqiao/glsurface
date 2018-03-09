@@ -28,6 +28,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.W = sz.x
         self.H = sz.y
         self.range = {'xmin':0, 'ymin':0, 'zmin':0, 'xmax':0, 'ymax':0, 'zmax':0}
+        self.zrange = []
         self.scale = {'base':1, 'zoom':1}
         self.invalidate = False
         self.rotateTheta = 0.05
@@ -42,8 +43,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                      'box':False, 'axis':False}
         self.contourLevels = 100
         self.transformMatrix = np.eye(3, dtype=np.float32)
-        self.colorMap = np.array([[0, 0, 1, 1], [0, 1, 1, 1], [0, 1, 0, 1],
-                                  [1, 1, 0, 1], [1, 0, 0, 1]], np.float32)
+        self.colorMap = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1], [0, 1, 0, 1],
+                                  [1, 1, 0,1],[1, 0.5, 0, 1], [1, 0, 0, 1]], np.float32)
         self.colorRange = []
         self.initialized = False
         self.rawPoints = points
@@ -301,29 +302,24 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             cMax = self.colorRange[1]
         scale = self.zAutoScale
         if zMax-zMin > 0:
-            scale = 1/(600*self.zAutoScale)
-        offset = -self.dataOffset['z']*scale
+            scale = 1/(zMax-zMin)
+        offset = 0 #-self.dataOffset['z']*scale
         if len(self.colorScale) == 2:
-            scale = self.colorScale[0]
+            scale = self.colorScale[0]/self.zAutoScale
             offset = self.colorScale[1]
 
         P = self.points
         C = self.colorMap
         CL = len(self.colorMap)-1
         self.pointsClr = np.zeros((len(P), 4))
-        for i in range(len(P)):
-            #z = (P[i][2]/ self.zAutoScale + self.dataOffset['z'])*scale + offset
-            z = (P[i][2] - zMin)*scale
-            if z <= cMin:
-                clr = C[0].copy()
-            elif z >= cMax:
-                clr = C[CL].copy()
-            else:
-                z = min(z, cMax)
-                zi = math.floor(z*CL)
-                delta = z*CL - zi
-                clr = C[zi] + (C[zi+1] - C[zi])*delta
-            self.pointsClr[i] = clr#[r/255., g/255., b/255., 1]
+        #    #z = (P[i][2]/ self.zAutoScale + self.dataOffset['z'])*scale + offset
+        norm_p = (P[:,2] - zMin)*scale + offset
+        norm_p = norm_p*len(self.colorMap)
+        norm_p = np.clip(norm_p, 0, len(self.colorMap)-1)
+        norm_p_l = np.floor(norm_p).astype(int)
+        norm_p_r = np.ceil(norm_p).astype(int)
+        norm_p_d = norm_p - norm_p_l
+        self.pointsClr = self.colorMap[norm_p_l,:] + (((self.colorMap[norm_p_r,:] - self.colorMap[norm_p_l,:]).T)*norm_p_d).T
 
     def update(self, param):
         genGLobj = False
@@ -333,7 +329,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             self.dimension = param['dimension']
             genGLobj = True
         if "colorscale" in param:
-            self.colorScale = param.colorscale
+            self.colorScale = param['colorscale']
         if "showtriangle" in param and self.show['triangle'] != param['showtriangle']:
             self.show['triangle'] = param['showtriangle']
             refresh = True
@@ -354,6 +350,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             self.contourLevels = param['contourlevel']
             refresh = True
             genGLobj = True
+        if 'zrange' in param:
+            self.zrange = param['zrange']
 
         if 'points' in param:
             self.reset()
@@ -365,6 +363,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             self.dataOffset['x'] = (xmax+xmin)/2
             self.dataOffset['y'] = (ymax+ymin)/2
             self.dataOffset['z'] = (zmax+zmin)/2
+            if self.zrange:
+                zmin, zmax = self.zrange
             o = self.dataOffset
             zg = 1
             if zmax-zmin > 0:
@@ -511,6 +511,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         contourAll = []
         block = int(len(self.points)*4/(2**16)+1)
         my = self.dimension['y']
+        mx = self.dimension['x']
         # the index of each block
         blocks = np.linspace(0, len(self.points), block+1, dtype=int)
         self.blocks = blocks
@@ -524,45 +525,96 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             P = self.points
             LEN = len(self.points)
             acolor = np.repeat(self.pointsClr[range(l, min(r+my+1, len(P)))], 4, axis=0)
-            for i in range(l, min(r+my+1, len(P))):
-                pos = list(P[i])
-                # self
-                avertex.append(list(pos))
-                if i+1 < LEN:
-                    # down
-                    pos[0] = P[i+1][0]
-                    pos[1] = P[i+1][1]
-                avertex.append(list(pos))
-                if i+1+my < LEN:
-                    # down right
-                    pos[0] = P[i+my+1][0]
-                    pos[1] = P[i+my+1][1]
-                avertex.append(list(pos))
-                if i+my < LEN:
-                    # right
-                    pos[0] = P[i+my][0]
-                    pos[1] = P[i+my][1]
-                avertex.append(list(pos))
+            # for each point (x[i], y[i], z[i]), construct a quad with
+            # (x[i],   y[i],   z[i])
+            # (x[i+1], y[i],   z[i])
+            # (x[i+1], y[i+1], z[i])
+            # (x[i],   y[i+1], z[i])
+            avertex = np.zeros(((min(r+my+1, len(P)) - l)*4,3))
+            # the index
+            idx = np.arange(l,  min(r+my+1, len(P)))
+            # the corresponding row & col
+            rr = (idx%my).astype(int)
+            cc = (idx/my).astype(int)
+            # the row for each 4 points in the same quad
+            rr = np.matrix(rr).T
+            rr = np.repeat(rr, 4, axis=1) + [0, 1, 1, 0]
+            rr = rr.flatten().clip(0, my-1)
+            # the col for each 4 points in the same quad
+            cc = np.matrix(cc).T
+            cc = np.repeat(cc, 4, axis=1) + [0, 0, 1, 1]
+            cc = cc.flatten().clip(0, mx-1)
+            # update the vertex of each quad
+            avertex[:,0] = P[cc*my + rr,0]
+            avertex[:,1] = P[cc*my + rr, 1]
+            # the quad use the same z value of (i, j)
+            avertex[:,2] = P[np.repeat(idx, 4), 2]
 
-            triangle = []
-            mesh = []
-            for i in range(0, r-l):
-                if (i+l)%my == my-1:
-                    continue
-                if i+l+my+1 < len(self.points):
-                    triangle.append([4*i, 4*i+1, 4*i+2, 4*i, 4*i+2, 4*i+3])
-                    mesh.append([4*i, 4*i+1, 4*i+1, 4*i+2, 4*i+2, 4*i+3, 4*i+3, 4*i])
-                    triangle.append([4*i+3, 4*i+2, 4*(i+my)+1, 4*i+3, 4*(i+my)+1, 4*(i+my)])
-                    mesh.append([4*i+3, 4*(i+my), 4*i+2, 4*(i+my)+1])
-                    triangle.append([4*i+1, 4*(i+1), 4*(i+1)+3, 4*i+1, 4*(i+1)+3, 4*(i)+2])
-                    mesh.append([4*i+1, 4*(i+1), 4*i+2, 4*(i+1)+3])
+            # mesh
+            mesh = np.zeros(((r-l)*4, 4))
+            idx = np.arange(0, r-l)
+            idx = np.matrix(idx).T
+            # mesh in the same quad
+            # mesh.append([4*i, 4*i+1, 4*i+1, 4*i+2, 4*i+2, 4*i+3, 4*i+3, 4*i])
+            mesh[0*(r-l):1*r-l] = np.repeat(idx, 4, axis=1)*4 + [0, 1, 1, 2]
+            mesh[1*(r-l):2*r-l] = np.repeat(idx, 4, axis=1)*4 + [2, 3, 3, 0]
+
+            # connect to the quad right
+            # mesh.append([4*i+3, 4*(i+my), 4*i+2, 4*(i+my)+1])
+            rr = (idx%my).astype(int)
+            cc = (idx/my).astype(int)
+            rr = np.repeat(rr, 4, axis=1) + [0, 0, 0, 0]
+            rr = rr.clip(0, my-1)
+            cc = np.repeat(cc, 4, axis=1) + [0, 1, 0, 1]
+            cc = cc.clip(0, mx-1)
+            mesh[2*(r-l):3*(r-l),:] = (cc*my + rr)*4 + [3, 0 ,2, 1]
+
+            # connect to the quad below
+            # mesh.append([4*i+1, 4*(i+1), 4*i+2, 4*(i+1)+3])
+            rr = (idx%my).astype(int)
+            cc = (idx/my).astype(int)
+            rr = np.repeat(rr, 4, axis=1) + [0, 1, 0, 1]
+            rr = rr.clip(0, my-1)
+            cc = np.repeat(cc, 4, axis=1) + [0, 0, 0, 0]
+            cc = cc.clip(0, mx-1)
+            mesh[3*(r-l):4*(r-l),:] = (cc*my + rr)*4 + [1, 0 ,2, 3]
+
+            # quad
+            triangle = np.zeros(((r-l)*3, 4))
+            idx = np.arange(0, r-l)
+            idx = np.matrix(idx).T
+            # the current quad
+            # triangle.append([4*i, 4*i+1, 4*i+2, 4*i+3])
+            triangle[0:r-l, :] = np.repeat(idx, 4, axis=1)*4 + [0, 1, 2, 3]
+
+            # connect to the quad right
+            # triangle.append([4*i+3, 4*i+2, 4*(i+my)+1, 4*(i+my)])
+            rr = (idx%my).astype(int)
+            cc = (idx/my).astype(int)
+            rr = np.repeat(rr, 4, axis=1) + [0, 0, 0, 0]
+            rr = rr.clip(0, my-1)
+            cc = np.repeat(cc, 4, axis=1) + [0, 0, 1, 1]
+            cc = cc.clip(0, mx-1)
+            triangle[r-l:2*(r-l),:] = (cc*my + rr)*4 + [3, 2 ,1, 0]
+
+            # connect to the quad below
+            # triangle.append([4*i+1, 4*(i+1), 4*(i+1)+3, 4*(i)+2])
+            rr = (idx%my).astype(int)
+            cc = (idx/my).astype(int)
+            rr = np.repeat(rr, 4, axis=1) + [0, 1, 1, 0]
+            rr = rr.clip(0, my-1)
+            cc = np.repeat(cc, 4, axis=1) + [0, 0, 0, 0]
+            cc = cc.clip(0, mx-1)
+            triangle[2*(r-l):3*(r-l),:] = (cc*my + rr)*4 + [1, 0 ,3, 2]
+
+
             contour = None
             if self.show['contour']:
                 contour = self.prepareContour(l, r)
-            avertex = [j for i in avertex for j in i]
+            avertex = avertex.flatten()
             acolor = acolor.flatten()
-            triangle = [j for i in triangle for j in i]
-            mesh = [j for i in mesh for j in i]
+            triangle = triangle.flatten()#[j for i in triangle for j in i]
+            mesh = mesh.flatten()#[j for i in mesh for j in i]
             vertexAll.append(avertex)
             colorAll.append(acolor)
             triangleAll.append(triangle)
@@ -701,6 +753,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
 
         vertexScaleGL = glGetUniformLocation(self.ShaderProgram, "VertexScaleGL")
         zgain = max(abs(self.range['zmax']), abs(self.range['zmin']))
+        if zgain == 0:
+            zgain = 1
         glUniform3f(vertexScaleGL, 1, -1, -0.1/zgain)
 
         vertexScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
@@ -715,7 +769,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         for b in range(block):
             self.setGLBuffer(obj['Vertices'][b], obj['Color'][b])
             if self.show['triangle']:
-                self.drawElementGL(GL_TRIANGLES, obj['Trinagles'][b], 0)
+                self.drawElementGL(GL_QUADS, obj['Trinagles'][b], 0)
             if self.show['mesh']:
                 self.drawElementGL(GL_LINES, obj['Mesh'][b], 1)
 
