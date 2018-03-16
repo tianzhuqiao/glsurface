@@ -5,13 +5,16 @@ import sys
 import math
 import numpy as np
 from wx import glcanvas
-from functools import cmp_to_key
+import OpenGL
+OpenGL.ERROR_CHECKING = False
+OpenGL.ERROR_LOGGING = False
+OpenGL.ERROR_ON_COPY = True
 from OpenGL.GL import *
 #from OpenGL.GLUT import *
 
 #----------------------------------------------------------------------
 class SimpleSurfaceCanvas(glcanvas.GLCanvas):
-    def __init__(self, parent, points, dim):
+    def __init__(self, parent, points=None):
         glcanvas.GLCanvas.__init__(self, parent, -1)
         self.init = False
         self.context = glcanvas.GLContext(self)
@@ -35,7 +38,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.margin = {'top':30, 'bottom':10, 'left':1, 'right':1}
         self.offset = {'base':{'x':0, 'y':0}, 'user':{'x':0, 'y':0}}
         self.dataOffset = {'x':0, 'y':0, 'z':0}
-        self.selected = {'pos':-1, 'clr':[1, 0, 1, 1]}
+        self.selected = {'x':-1, 'y':-1, 'clr':[1, 0, 1, 1]}
         self.colorScale = []
         self.blocks = []
         self.zAutoScale = 1
@@ -44,13 +47,14 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.contourLevels = 100
         self.transformMatrix = np.eye(3, dtype=np.float32)
         self.colorMap = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1], [0, 1, 0, 1],
-                                  [1, 1, 0, 1],[1, 0.5, 0, 1], [1, 0, 0, 1]], np.float32)
+                                  [1, 1, 0, 1], [1, 0.5, 0, 1], [1, 0, 0, 1]], np.float32)
         self.colorRange = []
         self.initialized = False
         self.rawPoints = points
-        self.dim = dim
         self.glObject = {}
         self.hudtext = ''
+        self._hudtext = ''
+        self._hudBuffer = None
         self.reset()
         #self.InitGL()
         #self.update({'points':points, 'dimension':dim})
@@ -94,7 +98,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.SetCurrent(self.context)
         if not self.initialized:
             self.InitGL()
-            self.update({'points':self.rawPoints, 'dimension':self.dim})
+            if self.rawPoints is not None:
+                self.update({'points':self.rawPoints})
             self.initialized = True
         self.draw()
         self.SwapBuffers()
@@ -174,7 +179,6 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.VertexColor = glGetAttribLocation(self.ShaderProgram, "VertexColor")
         glEnableVertexAttribArray(self.VertexColor)
         glViewport(0, 0, self.W, self.H)
-
     def MakePerspective(self, FOV, AspectRatio, Closest, Farest):
         YLimit = Closest * math.tan(FOV * math.pi / 360)
         A = -(Farest + Closest)/(Farest - Closest)
@@ -231,16 +235,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                    abs(self.dragStart['y']-self.dragEnd['y']) > 1:
                     self.isDragging = True
                 if self.isDragging:
-                    rotatex, rotatey = 0, 0
-                    if self.dragEnd['x']-self.dragStart['x'] > 10:
-                        rotatex = 1
-                    if self.dragEnd['x']-self.dragStart['x'] < -10:
-                        rotatex = -1
-                    if self.dragEnd['y']-self.dragStart['y'] > 10:
-                        rotatey = 1
-                    if self.dragEnd['y']-self.dragStart['y'] < -10:
-                        rotatey = -1
-                    self.rotate(-(self.dragEnd['y']-self.dragStart['y']), (self.dragEnd['x']-self.dragStart['x']), 0)
+                    self.rotate(-(self.dragEnd['y']-self.dragStart['y']),
+                                (self.dragEnd['x']-self.dragStart['x']), 0)
                     self.dragStart['x'] = self.dragEnd['x']
                     self.dragStart['y'] = self.dragEnd['y']
 
@@ -325,22 +321,20 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         CL = len(self.colorMap)-1
         self.pointsClr = np.zeros((len(P), 4))
         #    #z = (P[i][2]/ self.zAutoScale + self.dataOffset['z'])*scale + offset
-        norm_p = (P[:,2] - zMin)*scale + offset
+        norm_p = (P[:, 2] - zMin)*scale + offset
         norm_p = norm_p*len(self.colorMap)
         norm_p = np.clip(norm_p, 0, len(self.colorMap)-1)
         norm_p_l = np.floor(norm_p).astype(int)
         norm_p_r = np.ceil(norm_p).astype(int)
         norm_p_d = norm_p - norm_p_l
-        self.pointsClr = self.colorMap[norm_p_l,:] + (((self.colorMap[norm_p_r,:] - self.colorMap[norm_p_l,:]).T)*norm_p_d).T
-        sel = self.selected['pos']
+        self.pointsClr = C[norm_p_l, :] + (((C[norm_p_r, :] - C[norm_p_l, :]).T)*norm_p_d).T
+        sel = self.selected['x'] * self.dimension['y'] + self.selected['y']
         if sel >= 0 and sel < len(P):
             self.pointsClr[sel, :] = self.selected['clr']
+
     def update(self, param):
         genGLobj = False
         refresh = False
-        if "dimension" in param:
-            self.dimension = param['dimension']
-            genGLobj = True
         if "colorscale" in param:
             self.colorScale = param['colorscale']
         if "showtriangle" in param and self.show['triangle'] != param['showtriangle']:
@@ -349,6 +343,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         if "showmesh" in param and self.show['mesh'] != param['showmesh']:
             self.show['mesh'] = param['showmesh']
             refresh = True
+            genGLobj = True
         if "showcontour" in param and self.show['contour'] != param['showcontour']:
             self.show['contour'] = param['showcontour']
             refresh = True
@@ -382,8 +377,30 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             self.points = []
             points = param['points']
             self.rawPoints = points
-            xmin, ymin, zmin = np.amin(points, 0)
-            xmax, ymax, zmax = np.amax(points, 0)
+            zdim = points['z'].shape
+            xy = np.meshgrid(np.arange(0, zdim[1]+1), np.arange(0, zdim[0]+1))
+            if 'x' not in points:
+                Px = xy[0]
+            else:
+                Px = np.zeros((zdim[0]+1, zdim[1]+1))
+                Px[0:zdim[0], 0:zdim[1]] = points['x']
+                Px[-1, 0:zdim[1]] = points['x'][-1, :]
+                Px[:, -1] = Px[:, -2]*2 - Px[:, -3]
+            if 'y' not in points:
+                Py = xy[1]
+            else:
+                Py = np.zeros((zdim[0]+1, zdim[1]+1))
+                Py[0:zdim[0], 0:zdim[1]] = points['y']
+                Py[0:zdim[0], -1] = points['y'][:, -1]
+                Py[-1, :] = Py[-2, :]*2 - Py[-3, :]
+
+            Pz = np.zeros((zdim[0]+1, zdim[1]+1))
+            Pz[0:zdim[0], 0:zdim[1]] = points['z']
+            Pz[-1, 0:zdim[1]] = points['z'][-1, :]
+            Pz[:, -1] = Pz[:, -2]
+            self.dimension = {'x': zdim[1]+1, 'y':zdim[0]+1}
+            xmin, ymin, zmin = np.min(Px), np.min(Py), np.min(Pz)
+            xmax, ymax, zmax = np.max(Px), np.max(Py), np.max(Pz)
             self.dataOffset['x'] = (xmax+xmin)/2
             self.dataOffset['y'] = (ymax+ymin)/2
             self.dataOffset['z'] = (zmax+zmin)/2
@@ -394,7 +411,10 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             if zmax-zmin > 0:
                 zg = (ymax-ymin)/(zmax-zmin)
             self.zAutoScale = zg
-            self.points = points*np.array([1, 1, zg]) - np.array([o['x'], o['y'], o['z']*zg])
+            self.points = np.zeros((Pz.size, 3))
+            self.points[:, 0] = (Px - o['x']).T.flatten()
+            self.points[:, 1] = (Py - o['y']).T.flatten()
+            self.points[:, 2] = ((Pz - o['z'])*zg).T.flatten()
             xmin -= o['x']
             xmax -= o['x']
             ymin -= o['y']
@@ -406,10 +426,9 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             self.resize()
             refresh = True
             genGLobj = True
-
         if genGLobj:
             self.color()
-            self.glObject = self.prepareGL()
+            self.glObject = None#self.prepareGL()
         if refresh:
             self.redraw()
 
@@ -534,98 +553,93 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         P = self.points
         for k in range(1, len(blocks)):
             l, r = r, blocks[k]
-
-            acolor = np.repeat(self.pointsClr[range(l, min(r+my+1, len(P)))], 4, axis=0)
-
+            acolor = np.repeat(self.pointsClr[np.arange(l, min(r+my+1, len(P)))], 4, axis=0)
             # for each point (x[i], y[i], z[i]), construct a quad with
             # (x[i],   y[i],   z[i])
             # (x[i+1], y[i],   z[i])
             # (x[i+1], y[i+1], z[i])
             # (x[i],   y[i+1], z[i])
-            avertex = np.zeros(((min(r+my+1, len(P)) - l)*4,3))
+            avertex = np.zeros(((min(r+my+1, len(P)) - l)*4, 3))
             # the index
-            idx = np.arange(l,  min(r+my+1, len(P)))
+            idx = np.arange(l, min(r+my+1, len(P)))
+            idx = np.matrix(idx).T
+            idx = np.repeat(idx, 4, axis=1)
             # the corresponding row & col
-            rr = (idx%my).astype(int)
-            cc = (idx/my).astype(int)
+            cc, rr = np.divmod(idx, my)
+            #cc = (idx/my).astype(int)
             # the row for each 4 points in the same quad
-            rr = np.matrix(rr).T
-            rr = np.repeat(rr, 4, axis=1) + [0, 1, 1, 0]
+            rr = rr + [0, 1, 1, 0]
             rr = rr.flatten().clip(0, my-1)
             # the col for each 4 points in the same quad
-            cc = np.matrix(cc).T
-            cc = np.repeat(cc, 4, axis=1) + [0, 0, 1, 1]
+            cc = cc + [0, 0, 1, 1]
             cc = cc.flatten().clip(0, mx-1)
             # update the vertex of each quad
-            avertex[:,0] = P[cc*my + rr,0]
-            avertex[:,1] = P[cc*my + rr, 1]
+            avertex[:, 0] = P[(cc*my + rr), 0]
+            avertex[:, 1] = P[(cc*my + rr), 1]
             # the quad use the same z value of (i, j)
-            avertex[:,2] = P[np.repeat(idx, 4), 2]
+            avertex[:, 2] = P[idx.flatten(), 2]
+
+            # index for quad and mesh
+            idx = np.arange(0, r-l)
+            idx = np.matrix(idx).T
+            idx = np.repeat(idx, 4, axis=1)
+            COLS, ROWS = np.divmod(idx, my)
+            idx = idx*4
 
             # quad
             triangle = np.zeros(((r-l)*3, 4))
-            idx = np.arange(0, r-l)
-            idx = np.matrix(idx).T
             # the current quad
             # triangle.append([4*i, 4*i+1, 4*i+2, 4*i+3])
-            triangle[0:r-l, :] = np.repeat(idx, 4, axis=1)*4 + [0, 1, 2, 3]
+            triangle[0:r-l, :] = idx + [0, 1, 2, 3]
 
             # connect to the quad right
             # triangle.append([4*i+3, 4*i+2, 4*(i+my)+1, 4*(i+my)])
-            rr = (idx%my).astype(int)
-            cc = (idx/my).astype(int)
-            rr = np.repeat(rr, 4, axis=1) + [0, 0, 0, 0]
-            rr = rr.clip(0, my-1)
-            cc = np.repeat(cc, 4, axis=1) + [0, 0, 1, 1]
+            rr = ROWS #+ [0, 0, 0, 0]
+            #rr = rr.clip(0, my-1)
+            cc = COLS + [0, 0, 1, 1]
             cc = cc.clip(0, mx-1)
-            triangle[r-l:2*(r-l),:] = (cc*my + rr)*4 + [3, 2 ,1, 0]
+            triangle[r-l:2*(r-l), :] = (cc*my + rr)*4 + [3, 2, 1, 0]
 
             # connect to the quad below
             # triangle.append([4*i+1, 4*(i+1), 4*(i+1)+3, 4*(i)+2])
-            rr = (idx%my).astype(int)
-            cc = (idx/my).astype(int)
-            rr = np.repeat(rr, 4, axis=1) + [0, 1, 1, 0]
+            rr = ROWS + [0, 1, 1, 0]
             rr = rr.clip(0, my-1)
-            cc = np.repeat(cc, 4, axis=1) + [0, 0, 0, 0]
-            cc = cc.clip(0, mx-1)
-            triangle[2*(r-l):3*(r-l),:] = (cc*my + rr)*4 + [1, 0 ,3, 2]
+            cc = COLS #+ [0, 0, 0, 0]
+            #cc = cc.clip(0, mx-1)
+            triangle[2*(r-l):3*(r-l), :] = (cc*my + rr)*4 + [1, 0, 3, 2]
 
             # mesh
-            mesh = np.zeros(((r-l)*4, 4))
-            idx = np.arange(0, r-l)
-            idx = np.matrix(idx).T
-            # mesh in the same quad
-            # mesh.append([4*i, 4*i+1, 4*i+1, 4*i+2, 4*i+2, 4*i+3, 4*i+3, 4*i])
-            mesh[0*(r-l):1*r-l] = np.repeat(idx, 4, axis=1)*4 + [0, 1, 1, 2]
-            mesh[1*(r-l):2*r-l] = np.repeat(idx, 4, axis=1)*4 + [2, 3, 3, 0]
+            mesh = None
+            if self.show['mesh']:
+                mesh = np.zeros(((r-l)*4, 4))
+                # mesh in the same quad
+                # mesh.append([4*i, 4*i+1, 4*i+1, 4*i+2, 4*i+2, 4*i+3, 4*i+3, 4*i])
+                mesh[0*(r-l):1*r-l] = idx + [0, 1, 1, 2]
+                mesh[1*(r-l):2*r-l] = idx + [2, 3, 3, 0]
 
-            # connect to the quad right
-            # mesh.append([4*i+3, 4*(i+my), 4*i+2, 4*(i+my)+1])
-            rr = (idx%my).astype(int)
-            cc = (idx/my).astype(int)
-            rr = np.repeat(rr, 4, axis=1) + [0, 0, 0, 0]
-            rr = rr.clip(0, my-1)
-            cc = np.repeat(cc, 4, axis=1) + [0, 1, 0, 1]
-            cc = cc.clip(0, mx-1)
-            mesh[2*(r-l):3*(r-l),:] = (cc*my + rr)*4 + [3, 0 ,2, 1]
+                # connect to the quad right
+                # mesh.append([4*i+3, 4*(i+my), 4*i+2, 4*(i+my)+1])
+                rr = ROWS #+ [0, 0, 0, 0]
+                #rr = rr.clip(0, my-1)
+                cc = COLS + [0, 1, 0, 1]
+                cc = cc.clip(0, mx-1)
+                mesh[2*(r-l):3*(r-l), :] = (cc*my + rr)*4 + [3, 0, 2, 1]
 
-            # connect to the quad below
-            # mesh.append([4*i+1, 4*(i+1), 4*i+2, 4*(i+1)+3])
-            rr = (idx%my).astype(int)
-            cc = (idx/my).astype(int)
-            rr = np.repeat(rr, 4, axis=1) + [0, 1, 0, 1]
-            rr = rr.clip(0, my-1)
-            cc = np.repeat(cc, 4, axis=1) + [0, 0, 0, 0]
-            cc = cc.clip(0, mx-1)
-            mesh[3*(r-l):4*(r-l),:] = (cc*my + rr)*4 + [1, 0 ,2, 3]
+                # connect to the quad below
+                # mesh.append([4*i+1, 4*(i+1), 4*i+2, 4*(i+1)+3])
+                rr = ROWS + [0, 1, 0, 1]
+                rr = rr.clip(0, my-1)
+                cc = COLS #+ [0, 0, 0, 0]
+                #cc = cc.clip(0, mx-1)
+                mesh[3*(r-l):4*(r-l), :] = (cc*my + rr)*4 + [1, 0, 2, 3]
 
+                mesh = mesh.flatten()
             contour = None
             if self.show['contour']:
                 contour = self.prepareContour(l, r)
             avertex = avertex.flatten()
             acolor = acolor.flatten()
             triangle = triangle.flatten()
-            mesh = mesh.flatten()
             vertexAll.append(avertex)
             colorAll.append(acolor)
             triangleAll.append(triangle)
@@ -640,21 +654,21 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         # Bind it as The Current Buffer
         glBindBuffer(GL_ARRAY_BUFFER, VertexBuffer)
         # Fill it With the Data
-        glBufferData(GL_ARRAY_BUFFER, np.array(v).astype(np.float32), GL_STATIC_DRAW)
-
+        glBufferData(GL_ARRAY_BUFFER, np.array(v).flatten().astype(np.float32), GL_STATIC_DRAW)
         glVertexAttribPointer(self.VertexPosition, 3, GL_FLOAT, GL_FALSE, 0, None)
+
         cubeVerticesColorBuffer = glGenBuffers(1)
         glBindBuffer(GL_ARRAY_BUFFER, cubeVerticesColorBuffer)
-        glBufferData(GL_ARRAY_BUFFER, np.array(c).astype(np.float32), GL_STATIC_DRAW)
+        glBufferData(GL_ARRAY_BUFFER, np.array(c).flatten().astype(np.float32), GL_STATIC_DRAW)
         glVertexAttribPointer(self.VertexColor, 4, GL_FLOAT, GL_FALSE, 0, None)
 
     def drawElementGL(self, t, v, m, o=0):
         TriangleBuffer = glGenBuffers(1)
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, TriangleBuffer)
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, np.array(v).astype(np.uint16), GL_STATIC_DRAW)
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, np.array(v).flatten().astype(np.uint16), GL_STATIC_DRAW)
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "mesh"), m)
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "VertexOriginal"), o)
-        glDrawElements(t, len(v), GL_UNSIGNED_SHORT, None)
+        glDrawElements(t, v.size, GL_UNSIGNED_SHORT, None)
 
     def drawAxisGL(self):
         # var gx = 2*32/this.W*this.scale.base
@@ -721,16 +735,16 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glBindTexture(GL_TEXTURE_2D, texture)
 
         gx = 2*32/self.W*self.scale['base']
-        color = [0, 0, 0, 1,
+        color = np.array([0, 0, 0, 1,
                  0, 1, 0, 1,
                  1, 1, 0, 1,
                  1, 0, 0, 1,
                  0, 0, 0, 1,
                  0, 0, 0, 1,
                  0, 0, 0, 1,
-                 0, 0, 0, 1]
-        triangle = [0, 1, 2, 0, 2, 3]
-        mesh = [4, 5, 5, 6, 5, 7]
+                 0, 0, 0, 1])
+        triangle = np.array([0, 1, 2, 0, 2, 3])
+        mesh = np.array([4, 5, 5, 6, 5, 7])
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
         self.setGLBuffer(vertex, color)
         self.drawElementGL(GL_TRIANGLES, triangle, 3)
@@ -777,20 +791,23 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         vertexOffsetGL = glGetUniformLocation(self.ShaderProgram, "VertexOffsetGL")
         glUniform3f(vertexOffsetGL, 0, 0, 0)
 
-        obj = self.glObject
-        block = obj.get('block', 0)
-        for b in range(block):
-            self.setGLBuffer(obj['Vertices'][b], obj['Color'][b])
-            if self.show['triangle']:
-                self.drawElementGL(GL_QUADS, obj['Trinagles'][b], 0)
-            if self.show['mesh']:
-                self.drawElementGL(GL_LINES, obj['Mesh'][b], 1)
+        if self.show['triangle'] or self.show['mesh'] or self.show['contour']:
+            if not self.glObject:
+                self.glObject = self.prepareGL()
+            obj = self.glObject
+            block = obj.get('block', 0)
+            for b in range(block):
+                self.setGLBuffer(obj['Vertices'][b], obj['Color'][b])
+                if self.show['triangle']:
+                    self.drawElementGL(GL_QUADS, obj['Trinagles'][b], 0)
+                if self.show['mesh']:
+                    self.drawElementGL(GL_LINES, obj['Mesh'][b], 1)
 
-            if self.show['contour']:
-                ctr = obj['Contour'][b]
-                for c in range(len(ctr['Vertices'])):
-                    self.setGLBuffer(ctr['Vertices'][c], ctr['Color'][c])
-                    self.drawElementGL(GL_LINES, ctr['Mesh'][c], 0)
+                if self.show['contour']:
+                    ctr = obj['Contour'][b]
+                    for c in range(len(ctr['Vertices'])):
+                        self.setGLBuffer(ctr['Vertices'][c], ctr['Color'][c])
+                        self.drawElementGL(GL_LINES, ctr['Mesh'][c], 0)
 
         scaleAll = self.scale['base']
         glUniform3f(vertexScale, scaleAll, scaleAll, 1)
@@ -836,30 +853,34 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.drawHud()
 
     def drawHud(self):
-        if not self.hudtext:
+        if not self._hudtext and not self.hudtext:
             return
-        letter = self.hudtext
         W = int(self.W)
         H = int(self.H)
-        bitmap = wx.Bitmap(W, H)
-        tdc = wx.MemoryDC()
-        tdc.SelectObject(bitmap)
-        tdc.SetBackground(wx.Brush('white', wx.BRUSHSTYLE_TRANSPARENT))
-        tdc.Clear()
-        tdc.SetPen(wx.Pen('white'))
-        tdc.SetTextForeground(wx.WHITE)
-        tdc.SetFont(wx.Font(wx.FontInfo(13)))
-        tw, th = tdc.GetTextExtent(letter)
-        tdc.DrawText(letter, 5, th/2)
-        tdc.SelectObject(wx.NullBitmap)
+        if self._hudtext != self.hudtext:
+            self._hudtext = self.hudtext
+            letter = self.hudtext
+            tdc = wx.MemoryDC()
+            tw, th = tdc.GetTextExtent(letter)
+            HudW, HudH = tw+20, th+10
+            bitmap = wx.Bitmap(HudW, HudH)
+            tdc.SelectObject(bitmap)
+            tdc.SetBackground(wx.Brush('white', wx.BRUSHSTYLE_TRANSPARENT))
+            tdc.Clear()
+            tdc.SetPen(wx.Pen('white'))
+            tdc.SetTextForeground(wx.WHITE)
+            tdc.SetFont(wx.Font(wx.FontInfo(13)))
+            tdc.DrawText(letter, 5, th/2)
+            tdc.SelectObject(wx.NullBitmap)
+            self._hudBuffer = np.zeros((HudW, HudH, 4), np.uint8)
+            bitmap.CopyToBuffer(self._hudBuffer, wx.BitmapBufferFormat_RGBA)
 
         texture = glGenTextures(1)
         glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
         glBindTexture(GL_TEXTURE_2D, texture)
-        mybuffer = np.zeros((W, H, 4), np.uint8)
-        bitmap.CopyToBuffer(mybuffer, wx.BitmapBufferFormat_RGBA)
 
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, mybuffer)
+        HudW, HudH = self._hudBuffer.shape[0:2]
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, HudW, HudH, 0, GL_RGBA, GL_UNSIGNED_BYTE, self._hudBuffer)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
         glGenerateMipmap(GL_TEXTURE_2D)
@@ -869,21 +890,20 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, texture)
 
-        vertex = [-1, 1, 0,
-                  -1,-1, 0,
-                   1,-1, 0,
-                   1, 1, 0],
+        vertex = np.array([-1, 1, 1,
+                           -1,1-2.*HudH/H, 1,
+                           -1+2.*HudW/W, 1-2.*HudH/H, 1,
+                           -1+2.*HudW/W, 1, 1])
         # texture coordinate
-        color = [0, 0, 0, 1,
-                 0, 1, 0, 1,
-                 1, 1, 0, 1,
-                 1, 0, 0, 1,
-                 ]
-        triangle = [0, 1, 2, 3]
+        color = np.array([0, 0, 0, 1,
+                          0, 1, 0, 1,
+                          1, 1, 0, 1,
+                          1, 0, 0, 1])
+        triangle = np.array([0, 1, 2, 3])
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
         self.setGLBuffer(vertex, color)
         self.drawElementGL(GL_QUADS, triangle, 3, 1)
-
+    
     def redraw(self):
         self.Refresh()
         #self.invalidate = True
