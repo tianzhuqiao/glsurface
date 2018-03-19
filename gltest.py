@@ -4,7 +4,7 @@ import wx
 import sys
 import math
 import numpy as np
-from glcanvas import SimpleSurfaceCanvas
+from glsurface import SimpleSurfaceCanvas
 
 #----------------------------------------------------------------------
 class RunApp(wx.App):

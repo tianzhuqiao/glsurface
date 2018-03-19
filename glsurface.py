@@ -56,6 +56,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self._hudtext = ''
         self._hudBuffer = None
         self.reset()
+        self.InitGL()
         #self.InitGL()
         #self.update({'points':points, 'dimension':dim})
 
@@ -97,7 +98,6 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         dc = wx.PaintDC(self)
         self.SetCurrent(self.context)
         if not self.initialized:
-            self.InitGL()
             if self.rawPoints is not None:
                 self.update({'points':self.rawPoints})
             self.initialized = True
@@ -120,8 +120,11 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                            "varying vec4 vColor;\n"
                            "uniform int VertexOriginal;\n"
                            "void main(void) {\n"
-                           "    if(VertexOriginal==1) {\n"
-                           "        gl_Position=vec4(VertexPosition, 1.0);\n"
+                           "    if(VertexOriginal == 1) {\n"
+                           "        gl_Position = vec4(VertexPosition, 1.0);\n"
+                           "    } else if (VertexOriginal == 2) {\n"
+                           "        gl_Position = vec4((((VertexPosition-VertexOffsetView))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
+                           "        gl_Position = gl_Position*vec4(VertexScaleGL,1)+vec4(VertexOffsetGL,0);\n"
                            "    } else {\n"
                            "        gl_Position = vec4(((TransformationMatrix*(VertexPosition-VertexOffsetView))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
                            "        gl_Position = gl_Position*vec4(VertexScaleGL,1)+vec4(VertexOffsetGL,0);\n"
@@ -133,13 +136,13 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                             "uniform vec4 clr;\n"
                             "uniform sampler2D uSampler;\n"
                             "void main(void) {\n"
-                            "    if(mesh==0) {\n"
+                            "    if(mesh == 0) {\n"
                             "        gl_FragColor = vColor;\n"
-                            "    } else if(mesh==1) {\n"
+                            "    } else if(mesh == 1) {\n"
                             "        gl_FragColor = vec4(0,0,1,0.5);\n"
-                            "    } else if(mesh==2) {\n"
+                            "    } else if(mesh == 2) {\n"
                             "        gl_FragColor = clr;\n"
-                            "    } else if(mesh==3) {\n"
+                            "    } else if(mesh == 3) {\n"
                             "        vec4 textureColor = texture2D(uSampler, vec2(vColor[0], vColor[1]));\n"
                             "        gl_FragColor = vec4(textureColor.rgb , textureColor.a);\n"
                             "    }\n"
@@ -179,6 +182,9 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.VertexColor = glGetAttribLocation(self.ShaderProgram, "VertexColor")
         glEnableVertexAttribArray(self.VertexColor)
         glViewport(0, 0, self.W, self.H)
+        self.glBufs = glGenBuffers(3)
+        self.glTextures = glGenTextures(2)
+
     def MakePerspective(self, FOV, AspectRatio, Closest, Farest):
         YLimit = Closest * math.tan(FOV * math.pi / 360)
         A = -(Farest + Closest)/(Farest - Closest)
@@ -272,66 +278,28 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def getColorByZ(self, z):
         zMin = self.range['zmin']
         zMax = self.range['zmax']
-        cMin = 0
-        cMax = 1
-        if len(self.colorRange) == 2:
-            cMin = self.colorRange[0]
-            cMax = self.colorRange[1]
-        scale = 1
-        if zMax-zMin > 0:
-            scale = 1/(zMax-zMin)
-
-        zStep = abs(zMax - zMin) / (len(self.colorMap)-1)
-        P = self.points
-        C = self.colorMap
-        CL = len(self.colorMap)-1
-        z = (z-zMin)*scale
-        if z <= cMin:
-            r, g, b = C[0][0], C[0][1], C[0][2]
-        elif z >= cMax:
-            r, g, b = C[CL][0], C[CL][1], C[CL][2]
-        else:
-            z = min(z, cMax)
-            zi = math.floor(z*CL)
-            delta = z*CL - zi
-            r = C[zi][0] + (C[zi+1][0]-C[zi][0])*(delta)
-            g = C[zi][1] + (C[zi+1][1]-C[zi][1])*(delta)
-            b = C[zi][2] + (C[zi+1][2]-C[zi][2])*(delta)
-        clr = [r, g, b]
-        return clr
-
-    def color(self):
-        zMin = self.range['zmin']
-        zMax = self.range['zmax']
-        cMin = 0
-        cMax = 1
-        if len(self.colorRange) == 2:
-            cMin = self.colorRange[0]
-            cMax = self.colorRange[1]
         scale = self.zAutoScale
         if zMax-zMin > 0:
             scale = 1/(zMax-zMin)
-        offset = 0 #-self.dataOffset['z']*scale
+        offset = 0
         if len(self.colorScale) == 2:
             scale = self.colorScale[0]/self.zAutoScale
             offset = self.colorScale[1]
 
-        P = self.points
         C = self.colorMap
-        CL = len(self.colorMap)-1
-        self.pointsClr = np.zeros((len(P), 4))
-        #    #z = (P[i][2]/ self.zAutoScale + self.dataOffset['z'])*scale + offset
-        norm_p = (P[:, 2] - zMin)*scale + offset
+        norm_p = (z - zMin)*scale + offset
         norm_p = norm_p*len(self.colorMap)
         norm_p = np.clip(norm_p, 0, len(self.colorMap)-1)
         norm_p_l = np.floor(norm_p).astype(int)
         norm_p_r = np.ceil(norm_p).astype(int)
         norm_p_d = norm_p - norm_p_l
-        self.pointsClr = C[norm_p_l, :] + (((C[norm_p_r, :] - C[norm_p_l, :]).T)*norm_p_d).T
-        sel = self.selected['x'] * self.dimension['y'] + self.selected['y']
-        if sel >= 0 and sel < len(P):
-            self.pointsClr[sel, :] = self.selected['clr']
+        return C[norm_p_l, :] + (((C[norm_p_r, :] - C[norm_p_l, :]).T)*norm_p_d).T
 
+    def color(self):
+        self.pointsClr = self.getColorByZ(self.points[:,2])
+        sel = self.selected['x'] * self.dimension['y'] + self.selected['y']
+        if sel >= 0 and sel < self.points.shape[0]:
+            self.pointsClr[sel, :] = self.selected['clr']
     def update(self, param):
         genGLobj = False
         refresh = False
@@ -531,6 +499,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                     colour.append(clr)
         vertex = np.array(vertex).flatten()
         colour = np.array(colour).flatten()
+        mesh = np.array(mesh).flatten()
         vertexAll.append(vertex)
         meshAll.append(mesh)
         colourAll.append(colour)
@@ -649,23 +618,22 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                 'Trinagles':triangleAll, 'Mesh':meshAll, 'Contour':contourAll}
 
     def setGLBuffer(self, v, c):
-        # Create a New Buffer
-        VertexBuffer = glGenBuffers(1)
-        # Bind it as The Current Buffer
-        glBindBuffer(GL_ARRAY_BUFFER, VertexBuffer)
+        # vertex buffer
+        # Bind it as The Current Buffer'
+        glBindBuffer(GL_ARRAY_BUFFER, self.glBufs[0])
         # Fill it With the Data
-        glBufferData(GL_ARRAY_BUFFER, np.array(v).flatten().astype(np.float32), GL_STATIC_DRAW)
+        glBufferData(GL_ARRAY_BUFFER, v.astype(np.float32), GL_STATIC_DRAW)
         glVertexAttribPointer(self.VertexPosition, 3, GL_FLOAT, GL_FALSE, 0, None)
 
-        cubeVerticesColorBuffer = glGenBuffers(1)
-        glBindBuffer(GL_ARRAY_BUFFER, cubeVerticesColorBuffer)
-        glBufferData(GL_ARRAY_BUFFER, np.array(c).flatten().astype(np.float32), GL_STATIC_DRAW)
+        # color buffer
+        glBindBuffer(GL_ARRAY_BUFFER, self.glBufs[1])
+        glBufferData(GL_ARRAY_BUFFER, c.astype(np.float32), GL_STATIC_DRAW)
         glVertexAttribPointer(self.VertexColor, 4, GL_FLOAT, GL_FALSE, 0, None)
 
     def drawElementGL(self, t, v, m, o=0):
-        TriangleBuffer = glGenBuffers(1)
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, TriangleBuffer)
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, np.array(v).flatten().astype(np.uint16), GL_STATIC_DRAW)
+        #buf = glGenBuffers(1)
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.glBufs[2])
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, v.astype(np.uint16), GL_STATIC_DRAW)
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "mesh"), m)
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "VertexOriginal"), o)
         glDrawElements(t, v.size, GL_UNSIGNED_SHORT, None)
@@ -675,34 +643,34 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         r = self.range
         p = [r['xmax'], r['ymin'], r['zmin']]
         gx = 32/self.scale['base']
-        vertex = [p[0]-gx,   p[1]+gx,   p[2],
+        vertex = np.array([p[0]-gx,   p[1]+gx,   p[2],
                   p[0]-gx,   p[1],      p[2],
                   p[0],      p[1],      p[2],
                   p[0],      p[1]+gx,   p[2],
                   p[0]-gx,   p[1]+gx/4, p[2],
                   p[0],      p[1]+gx/4, p[2],
                   p[0]-gx/3, p[1]+gx/10,   p[2],
-                  p[0]-gx/3, p[1]+4*gx/10, p[2]]
+                  p[0]-gx/3, p[1]+4*gx/10, p[2]])
         self.drawAxisGL_help('x', vertex)
         p = [r['xmin'], r['ymax'], r['zmin']]
-        vertex = [p[0],    p[1],    p[2],
+        vertex = np.array([p[0],    p[1],    p[2],
                   p[0],    p[1]-gx, p[2],
                   p[0]+gx, p[1]-gx, p[2],
                   p[0]+gx, p[1],    p[2],
                   p[0]+gx/4, p[1]-gx,     p[2],
                   p[0]+gx/4, p[1],    p[2],
                   p[0]+gx/10,p[1]-gx/3,   p[2],
-                  p[0]+4*gx/10,p[1]-gx/3, p[2]]
+                  p[0]+4*gx/10,p[1]-gx/3, p[2]])
         self.drawAxisGL_help('y', vertex)
         p = [r['xmin'], r['ymin'], r['zmax']]
-        vertex = [p[0], p[1]+gx, p[2]-gx,
+        vertex = np.array([p[0], p[1]+gx, p[2]-gx,
                   p[0], p[1],    p[2]-gx,
                   p[0], p[1],    p[2],
                   p[0], p[1]+gx, p[2],
                   p[0], p[1]+gx/4,  p[2]-gx,
                   p[0], p[1]+gx/4,  p[2],
                   p[0], p[1]+gx/10,  p[2]-gx/3,
-                  p[0], p[1]+4*gx/10, p[2]-gx/3]
+                  p[0], p[1]+4*gx/10, p[2]-gx/3])
         self.drawAxisGL_help('z', vertex)
 
     def drawAxisGL_help(self, letter, vertex):
@@ -718,7 +686,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         tdc.DrawText(letter, (32-tw)/2, (32-th)/2)
         tdc.SelectObject(wx.NullBitmap)
 
-        texture = glGenTextures(1)
+        texture = self.glTextures[0]
         glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
         glBindTexture(GL_TEXTURE_2D, texture)
         mybuffer = np.zeros((32, 32, 4), np.uint8)
@@ -819,24 +787,24 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         if self.show['box']:
             glUniform1i(glGetUniformLocation(self.ShaderProgram, "mesh"), 0)
             r = self.range
-            vertex = [r['xmin'], r['ymin'], r['zmin'],
+            vertex = np.array([r['xmin'], r['ymin'], r['zmin'],
                       r['xmin'], r['ymax'], r['zmin'],
                       r['xmax'], r['ymax'], r['zmin'],
                       r['xmax'], r['ymin'], r['zmin'],
                       r['xmin'], r['ymin'], r['zmax'],
                       r['xmin'], r['ymax'], r['zmax'],
                       r['xmax'], r['ymax'], r['zmax'],
-                      r['xmax'], r['ymin'], r['zmax']]
-            color = [0, 0, 0, 1,
+                      r['xmax'], r['ymin'], r['zmax']])
+            color = np.array([0, 0, 0, 1,
                      0, 0, 0, 1,
                      0, 0, 0, 1,
                      0, 0, 0, 1,
                      0, 0, 0, 1,
                      0, 0, 0, 1,
                      0, 0, 0, 1,
-                     0, 0, 0, 1]
-            axis = [0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6,
-                    6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7]
+                     0, 0, 0, 1])
+            axis = np.array([0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6,
+                    6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7])
             #vertex = [ v / 10 for v in vertex]
             self.setGLBuffer(vertex, color)
             self.drawElementGL(GL_LINES, axis, 1)
@@ -875,7 +843,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             self._hudBuffer = np.zeros((HudW, HudH, 4), np.uint8)
             bitmap.CopyToBuffer(self._hudBuffer, wx.BitmapBufferFormat_RGBA)
 
-        texture = glGenTextures(1)
+        texture = self.glTextures[1]
         glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
         glBindTexture(GL_TEXTURE_2D, texture)
 
@@ -903,7 +871,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
         self.setGLBuffer(vertex, color)
         self.drawElementGL(GL_QUADS, triangle, 3, 1)
-    
+
     def redraw(self):
         self.Refresh()
         #self.invalidate = True
