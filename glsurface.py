@@ -100,7 +100,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.glObject = {}
         self.hudtext = ''
         self._hudtext = ''
-        self._hudBuffer = None
+        self._hudBuffer = np.zeros((0, 0, 4))
         self.reset()
 
         self.Bind(wx.EVT_ERASE_BACKGROUND, self.OnEraseBackground)
@@ -829,27 +829,25 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             return
         W = int(self.W)
         H = int(self.H)
-        if self._hudtext != self.hudtext:
+        HudW, HudH = self._hudBuffer.shape[0:2]
+        if self._hudtext != self.hudtext or HudW < W:
             self._hudtext = self.hudtext
             letter = self.hudtext
             tdc = wx.MemoryDC()
-            HudW, HudH = self.W, 32
+            HudW, HudH = W, 38
             bitmap = wx.Bitmap(HudW, HudH, depth=32)
             tdc.SelectObject(bitmap)
             gc = wx.GraphicsContext.Create(tdc)
             font = wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
             gc.SetFont(font, wx.WHITE)
-            tw, th = gc.GetTextExtent(letter)
-            gc.DrawText(letter, 5, th/2)
+            gc.DrawText(letter, 5, 5)
             tdc.SelectObject(wx.NullBitmap)
             self._hudBuffer = np.zeros((HudW, HudH, 4), np.uint8)
             bitmap.CopyToBuffer(self._hudBuffer, wx.BitmapBufferFormat_RGBA)
-
         texture = self.glTextures[1]
         glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
         glBindTexture(GL_TEXTURE_2D, texture)
 
-        HudW, HudH = self._hudBuffer.shape[0:2]
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, HudW, HudH, 0, GL_RGBA,
                      GL_UNSIGNED_BYTE, self._hudBuffer)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
@@ -861,10 +859,10 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, texture)
 
-        vertex = np.array([-1, 1, 1,
-                           -1, 1-2.*HudH/H, 1,
-                           -1+2.*HudW/W, 1-2.*HudH/H, 1,
-                           -1+2.*HudW/W, 1, 1])
+        vertex = np.array([-1, 1, -1,
+                           -1, 1-2.*HudH/H, -1,
+                           -1+2.*HudW/W, 1-2.*HudH/H, -1,
+                           -1+2.*HudW/W, 1, -1])
         # texture coordinate
         color = np.array([0, 0, 0, 1,
                           0, 1, 0, 1,

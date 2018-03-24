@@ -42,7 +42,7 @@ class SurfacePanel(wx.Panel):
         self.show = {'showtriangle':True, 'showmesh':False,
                      'showcontour':False, 'showbox':False, 'showaxis':False}
         self.canvas.update(self.show)
-        self.canvas.update({'hud':'x:0 y:0 min:0 max: 0'})
+        self.canvas.update({'hud':'min x:%d max x:%d min y:%d max y: %d min z: %d max z: %d'%(np.min(x), np.max(x), np.min(y), np.max(y), np.min(z), np.max(z))})
         self.Bind(wx.EVT_MENU, self.OnProcessMenuEvent)
         self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenu)
         self.Bind(wx.EVT_CONTEXT_MENU, self.OnContextMenu)
