@@ -10,12 +10,58 @@ OpenGL.ERROR_CHECKING = False
 OpenGL.ERROR_LOGGING = False
 OpenGL.ERROR_ON_COPY = True
 from OpenGL.GL import *
-#from OpenGL.GLUT import *
 
-#----------------------------------------------------------------------
+vtxShaderSource = (
+    "attribute vec3 VertexPosition;\n"
+    "attribute vec4 VertexColor;\n"
+    "uniform mat3 TransformationMatrix;\n"
+    "uniform mat4 PerspectiveMatrix;\n"
+    "uniform vec3 VertexResolution;\n"
+    "uniform vec3 VertexScale;\n"
+    "uniform vec3 VertexOffset;\n"
+    "uniform vec3 VertexOffsetView;\n"
+    "uniform vec3 VertexScaleGL;\n"
+    "uniform vec3 VertexOffsetGL;\n"
+    "varying vec2 vTextureCoord;\n"
+    "varying vec4 vColor;\n"
+    "uniform int VertexOriginal;\n"
+    "void main(void) {\n"
+    "    if(VertexOriginal == 1) {\n"
+    "        gl_Position = vec4(VertexPosition, 1.0);\n"
+    "    } else if (VertexOriginal == 2) {\n"
+    "        gl_Position = vec4((((VertexPosition-VertexOffsetView))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
+    "        gl_Position = gl_Position*vec4(VertexScaleGL,1)+vec4(VertexOffsetGL,0);\n"
+    "    } else {\n"
+    "        gl_Position = vec4(((TransformationMatrix*(VertexPosition-VertexOffsetView))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
+    "        gl_Position = gl_Position*vec4(VertexScaleGL,1)+vec4(VertexOffsetGL,0);\n"
+    "    }\n"
+    "    vColor = VertexColor;\n"
+    "}\n")
+
+fragShaderSource = (
+    "varying vec4 vColor;\n"
+    "uniform int mesh;\n"
+    "uniform vec4 clr;\n"
+    "uniform sampler2D uSampler;\n"
+    "void main(void) {\n"
+    "    if(mesh == 0) {\n"
+    "        gl_FragColor = vColor;\n"
+    "    } else if(mesh == 1) {\n"
+    "        gl_FragColor = vec4(0, 0, 1, 0.5);\n"
+    "    } else if(mesh == 2) {\n"
+    "        gl_FragColor = clr;\n"
+    "    } else if(mesh == 3) {\n"
+    "        vec4 textureColor = texture2D(uSampler, vec2(vColor[0], vColor[1]));\n"
+    "        gl_FragColor = vec4(textureColor.rgb , textureColor.a);\n"
+    "    }\n"
+    "}\n")
+
 class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def __init__(self, parent, points=None):
-        glcanvas.GLCanvas.__init__(self, parent, -1)
+        # set the depth size, otherwise the depth test may not work correctly.
+        attribs = [glcanvas.WX_GL_RGBA, glcanvas.WX_GL_DOUBLEBUFFER,
+                   glcanvas.WX_GL_DEPTH_SIZE, 32]
+        glcanvas.GLCanvas.__init__(self, parent, -1, attribList=attribs)
         self.init = False
         self.context = glcanvas.GLContext(self)
 
@@ -33,9 +79,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.range = {'xmin':0, 'ymin':0, 'zmin':0, 'xmax':0, 'ymax':0, 'zmax':0}
         self.zrange = []
         self.scale = {'base':1, 'zoom':1}
-        self.invalidate = False
         self.rotateTheta = 0.05
-        self.margin = {'top':30, 'bottom':10, 'left':1, 'right':1}
+        self.margin = {'top':50, 'bottom':10, 'left':1, 'right':1}
         self.offset = {'base':{'x':0, 'y':0}, 'user':{'x':0, 'y':0}}
         self.dataOffset = {'x':0, 'y':0, 'z':0}
         self.selected = {'x':-1, 'y':-1, 'clr':[1, 0, 1, 1]}
@@ -46,8 +91,9 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                      'box':False, 'axis':False}
         self.contourLevels = 100
         self.transformMatrix = np.eye(3, dtype=np.float32)
-        self.colorMap = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1], [0, 1, 0, 1],
-                                  [1, 1, 0, 1], [1, 0.5, 0, 1], [1, 0, 0, 1]], np.float32)
+        self.colorMap = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1],
+                                  [0, 1, 0, 1], [1, 1, 0, 1], [1, 0.5, 0, 1],
+                                  [1, 0, 0, 1]], np.float32)
         self.colorRange = []
         self.initialized = False
         self.rawPoints = points
@@ -56,9 +102,6 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self._hudtext = ''
         self._hudBuffer = None
         self.reset()
-        self.InitGL()
-        #self.InitGL()
-        #self.update({'points':points, 'dimension':dim})
 
         self.Bind(wx.EVT_ERASE_BACKGROUND, self.OnEraseBackground)
         self.Bind(wx.EVT_SIZE, self.OnSize)
@@ -91,13 +134,14 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def OnSize(self, event):
         # update the size
         self.resize()
-
+        self.redraw()
         event.Skip()
 
     def OnPaint(self, event):
         dc = wx.PaintDC(self)
         self.SetCurrent(self.context)
         if not self.initialized:
+            self.InitGL()
             if self.rawPoints is not None:
                 self.update({'points':self.rawPoints})
             self.initialized = True
@@ -106,54 +150,12 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
 
     def InitGL(self):
         self.SetCurrent(self.context)
-        vtxShaderSource = ("attribute vec3 VertexPosition;\n"
-                           "attribute vec4 VertexColor;\n"
-                           "uniform mat3 TransformationMatrix;\n"
-                           "uniform mat4 PerspectiveMatrix;\n"
-                           "uniform vec3 VertexResolution;\n"
-                           "uniform vec3 VertexScale;\n"
-                           "uniform vec3 VertexOffset;\n"
-                           "uniform vec3 VertexOffsetView;\n"
-                           "uniform vec3 VertexScaleGL;\n"
-                           "uniform vec3 VertexOffsetGL;\n"
-                           "varying vec2 vTextureCoord;\n"
-                           "varying vec4 vColor;\n"
-                           "uniform int VertexOriginal;\n"
-                           "void main(void) {\n"
-                           "    if(VertexOriginal == 1) {\n"
-                           "        gl_Position = vec4(VertexPosition, 1.0);\n"
-                           "    } else if (VertexOriginal == 2) {\n"
-                           "        gl_Position = vec4((((VertexPosition-VertexOffsetView))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
-                           "        gl_Position = gl_Position*vec4(VertexScaleGL,1)+vec4(VertexOffsetGL,0);\n"
-                           "    } else {\n"
-                           "        gl_Position = vec4(((TransformationMatrix*(VertexPosition-VertexOffsetView))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
-                           "        gl_Position = gl_Position*vec4(VertexScaleGL,1)+vec4(VertexOffsetGL,0);\n"
-                           "    }\n"
-                           "    vColor = VertexColor;\n"
-                           "}\n")
-        fragShaderSource = ("varying vec4 vColor;\n"
-                            "uniform int mesh;\n"
-                            "uniform vec4 clr;\n"
-                            "uniform sampler2D uSampler;\n"
-                            "void main(void) {\n"
-                            "    if(mesh == 0) {\n"
-                            "        gl_FragColor = vColor;\n"
-                            "    } else if(mesh == 1) {\n"
-                            "        gl_FragColor = vec4(0,0,1,0.5);\n"
-                            "    } else if(mesh == 2) {\n"
-                            "        gl_FragColor = clr;\n"
-                            "    } else if(mesh == 3) {\n"
-                            "        vec4 textureColor = texture2D(uSampler, vec2(vColor[0], vColor[1]));\n"
-                            "        gl_FragColor = vec4(textureColor.rgb , textureColor.a);\n"
-                            "    }\n"
-                            "}\n")
+
         glClearColor(1.0, 1.0, 1.0, 1.0) # this is the color
         glEnable(GL_DEPTH_TEST) # Enable Depth Testing
         glDepthFunc(GL_LEQUAL) # Set Perspective View
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glEnable(GL_BLEND)
-        # move this onsize
-        #this.AspectRatio = this.canvas.width / this.canvas.height
 
         FShader = fragShaderSource
         VShader = vtxShaderSource
@@ -182,6 +184,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.VertexColor = glGetAttribLocation(self.ShaderProgram, "VertexColor")
         glEnableVertexAttribArray(self.VertexColor)
         glViewport(0, 0, self.W, self.H)
+        # generate the buffer
         self.glBufs = glGenBuffers(3)
         self.glTextures = glGenTextures(2)
 
@@ -199,16 +202,16 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def OnKeyDown(self, event):
         keycode = event.GetKeyCode()
         x, y, z = 0, 0, 0
-        if keycode == wx.WXK_UP: # upArrow:
+        if keycode == wx.WXK_UP:
             x = 1
-        elif keycode == wx.WXK_DOWN: # downArrow:
+        elif keycode == wx.WXK_DOWN:
             x = -1
-        elif keycode == wx.WXK_LEFT: # leftArrow:
+        elif keycode == wx.WXK_LEFT:
             if event.CmdDown():
                 z = -1
             else:
                 y = -1
-        elif keycode == wx.WXK_RIGHT: # rightArrow:
+        elif keycode == wx.WXK_RIGHT:
             if event.CmdDown():
                 z = 1
             else:
@@ -256,16 +259,18 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.redraw()
 
     def OnMouseWheel(self, event):
-        delta = event.GetWheelRotation()
+        delta = (event.GetWheelRotation() > 0)*2-1
         bRect = self.GetClientRect()
         pos = event.GetPosition()
-        x = (pos.x - bRect.left)*((self.W)/bRect.width)
-        y = (pos.y - bRect.top)*((self.H)/bRect.height)
+        x = (pos.x-bRect.left)*((self.W)/bRect.width)
+        y = (pos.y-bRect.top)*((self.H)/bRect.height)
         if delta:
             zoom = 1.1**delta
             self.scale['zoom'] *= zoom
-            self.offset['user']['x'] = x - (x-self.offset['base']['x']-self.offset['user']['x'])*zoom - self.offset['base']['x']
-            self.offset['user']['y'] = y - (y-self.offset['base']['y']-self.offset['user']['y'])*zoom - self.offset['base']['y']
+            base = self.offset['base']
+            user = self.offset['user']
+            user['x'] = x - (x-base['x']-user['x'])*zoom - base['x']
+            user['y'] = y - (y-base['y']-user['y'])*zoom - base['y']
             self.redraw()
 
     def reset(self):
@@ -273,7 +278,6 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.transformMatrix = np.eye(3, dtype=np.float32)
         self.scale['zoom'] = 1
         self.offset['user'] = {'x':0, 'y':0}
-        self.invalidate = False
 
     def getColorByZ(self, z):
         zMin = self.range['zmin']
@@ -296,10 +300,11 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         return C[norm_p_l, :] + (((C[norm_p_r, :] - C[norm_p_l, :]).T)*norm_p_d).T
 
     def color(self):
-        self.pointsClr = self.getColorByZ(self.points[:,2])
+        self.pointsClr = self.getColorByZ(self.points[:, 2])
         sel = self.selected['x'] * self.dimension['y'] + self.selected['y']
         if sel >= 0 and sel < self.points.shape[0]:
             self.pointsClr[sel, :] = self.selected['clr']
+
     def update(self, param):
         genGLobj = False
         refresh = False
@@ -396,7 +401,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             genGLobj = True
         if genGLobj:
             self.color()
-            self.glObject = None#self.prepareGL()
+            # the objects will be re-generated before drawing
+            self.glObject = None
         if refresh:
             self.redraw()
 
@@ -412,12 +418,12 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             # do nothing
             pass
         elif v[0][2] < level and v[1][2] > level:
-            p1 = (v[0] - v[1])/(v[0][2] - v[1][2])*(level-v[0][2])+v[0]
-            p2 = (v[0] - v[2])/(v[0][2] - v[2][2])*(level-v[0][2])+v[0]
+            p1 = (v[0]-v[1])/(v[0][2]-v[1][2])*(level-v[0][2])+v[0]
+            p2 = (v[0]-v[2])/(v[0][2]-v[2][2])*(level-v[0][2])+v[0]
             valid = True
         elif v[1][2] < level and v[2][2] > level:
-            p1 = (v[2] - v[0])/(v[2][2] - v[0][2])*(level-v[2][2])+v[2]
-            p2 = (v[2] - v[1])/(v[2][2] - v[1][2])*(level-v[2][2])+v[2]
+            p1 = (v[2]-v[0])/(v[2][2]-v[0][2])*(level-v[2][2])+v[2]
+            p2 = (v[2]-v[1])/(v[2][2]-v[1][2])*(level-v[2][2])+v[2]
             valid = True
         elif v[0][2] == level and v[1][2] == level:
             p1 = v[0]
@@ -431,8 +437,13 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         return {'valid':valid, 'p1':p1, 'p2':p2}
 
     def prepareContour(self, L, R):
-        zmin = self.range['zmin']
-        zmax = self.range['zmax']
+        xmin, xmax = self.range['xmin'], self.range['xmax']
+        ymin, ymax = self.range['ymin'], self.range['ymax']
+        zmin, zmax = self.range['zmin'], self.range['zmax']
+        # ugly, offset the contour to make it 'align' with mesh and quad
+        ox = (xmax-xmin)/(self.dimension['x']-1)/2
+        oy = (ymax-ymin)/(self.dimension['y']-1)/2
+        oz = 0
         # calculate the contour levels uniformly, ignore endpoints (zmin, zmax)
         levels = np.linspace(zmin, zmax, self.contourLevels+1, endpoint=False)[1:]
         my = self.dimension['y']
@@ -470,7 +481,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                 if len(vertex) > 2**16-10:
                     # too many vertex, add to separate block to avoid overflow
                     # when rendering
-                    vertex = np.array(vertex).flatten()
+                    vertex = (np.array(vertex)+[ox, oy, oz]).flatten()
                     colour = np.array(colour).flatten()
                     vertexAll.append(vertex)
                     meshAll.append(mesh)
@@ -497,7 +508,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                     mesh.append(len(vertex)-1)
                     colour.append(clr)
                     colour.append(clr)
-        vertex = np.array(vertex).flatten()
+        vertex = (np.array(vertex)+[ox, oy, oz]).flatten()
         colour = np.array(colour).flatten()
         mesh = np.array(mesh).flatten()
         vertexAll.append(vertex)
@@ -631,7 +642,6 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glVertexAttribPointer(self.VertexColor, 4, GL_FLOAT, GL_FALSE, 0, None)
 
     def drawElementGL(self, t, v, m, o=0):
-        #buf = glGenBuffers(1)
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.glBufs[2])
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, v.astype(np.uint16), GL_STATIC_DRAW)
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "mesh"), m)
@@ -639,60 +649,59 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glDrawElements(t, v.size, GL_UNSIGNED_SHORT, None)
 
     def drawAxisGL(self):
-        # var gx = 2*32/this.W*this.scale.base
         r = self.range
-        p = [r['xmax'], r['ymin'], r['zmin']]
         gx = 32/self.scale['base']
-        vertex = np.array([p[0]-gx,   p[1]+gx,   p[2],
-                  p[0]-gx,   p[1],      p[2],
-                  p[0],      p[1],      p[2],
-                  p[0],      p[1]+gx,   p[2],
-                  p[0]-gx,   p[1]+gx/4, p[2],
-                  p[0],      p[1]+gx/4, p[2],
-                  p[0]-gx/3, p[1]+gx/10,   p[2],
-                  p[0]-gx/3, p[1]+4*gx/10, p[2]])
+        p = [r['xmax'], r['ymax'], r['zmax']]
+        vertex = np.array([p[0]-gx,   p[1],   p[2],
+                           p[0]-gx,   p[1]-gx,      p[2],
+                           p[0],      p[1]-gx,      p[2],
+                           p[0],      p[1],   p[2],
+                           p[0]-gx,   p[1], p[2],
+                           p[0],      p[1], p[2],
+                           p[0]-gx/3, p[1]+gx/5,   p[2],
+                           p[0]-gx/3, p[1]-gx/5, p[2]])
         self.drawAxisGL_help('x', vertex)
-        p = [r['xmin'], r['ymax'], r['zmin']]
+        p = [r['xmin'], r['ymax'], r['zmax']]
         vertex = np.array([p[0],    p[1],    p[2],
-                  p[0],    p[1]-gx, p[2],
-                  p[0]+gx, p[1]-gx, p[2],
-                  p[0]+gx, p[1],    p[2],
-                  p[0]+gx/4, p[1]-gx,     p[2],
-                  p[0]+gx/4, p[1],    p[2],
-                  p[0]+gx/10,p[1]-gx/3,   p[2],
-                  p[0]+4*gx/10,p[1]-gx/3, p[2]])
+                           p[0],    p[1]-gx, p[2],
+                           p[0]+gx, p[1]-gx, p[2],
+                           p[0]+gx, p[1],    p[2],
+                           p[0], p[1]-gx,     p[2],
+                           p[0], p[1],    p[2],
+                           p[0]+gx/5,p[1]-gx/3,   p[2],
+                           p[0]-gx/5,p[1]-gx/3, p[2]])
         self.drawAxisGL_help('y', vertex)
         p = [r['xmin'], r['ymin'], r['zmax']]
         vertex = np.array([p[0], p[1]+gx, p[2]-gx,
-                  p[0], p[1],    p[2]-gx,
-                  p[0], p[1],    p[2],
-                  p[0], p[1]+gx, p[2],
-                  p[0], p[1]+gx/4,  p[2]-gx,
-                  p[0], p[1]+gx/4,  p[2],
-                  p[0], p[1]+gx/10,  p[2]-gx/3,
-                  p[0], p[1]+4*gx/10, p[2]-gx/3])
+                           p[0], p[1],    p[2]-gx,
+                           p[0], p[1],    p[2],
+                           p[0], p[1]+gx, p[2],
+                           p[0], p[1],  p[2]-gx,
+                           p[0], p[1],  p[2],
+                           p[0], p[1]+gx/5, p[2]-gx/3,
+                           p[0], p[1]-gx/5, p[2]-gx/3])
         self.drawAxisGL_help('z', vertex)
 
     def drawAxisGL_help(self, letter, vertex):
-        bitmap = wx.Bitmap(32, 32)
+        W, H = 32, 32
+        bitmap = wx.Bitmap(W, H, 32)
         tdc = wx.MemoryDC()
         tdc.SelectObject(bitmap)
-        tdc.SetBackground(wx.Brush('black', wx.BRUSHSTYLE_TRANSPARENT))
-        tdc.Clear()
-        tdc.SetPen(wx.Pen('blue'))
-        tdc.SetTextForeground(wx.RED)
-        tdc.SetFont(wx.Font(wx.FontInfo(16).Bold()))
-        tw, th = tdc.GetTextExtent(letter)
-        tdc.DrawText(letter, (32-tw)/2, (32-th)/2)
+        gc = wx.GraphicsContext.Create(tdc)
+        font = wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+        gc.SetFont(font, wx.WHITE)
+        tw, th = gc.GetTextExtent(letter)
+        gc.DrawText(letter, (W-tw)/2, (H-th)/2)
         tdc.SelectObject(wx.NullBitmap)
 
         texture = self.glTextures[0]
         glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
         glBindTexture(GL_TEXTURE_2D, texture)
-        mybuffer = np.zeros((32, 32, 4), np.uint8)
+        mybuffer = np.zeros((W, H, 4), np.uint8)
         bitmap.CopyToBuffer(mybuffer, wx.BitmapBufferFormat_RGBA)
 
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 32, 32, 0, GL_RGBA, GL_UNSIGNED_BYTE, mybuffer)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA,
+                     GL_UNSIGNED_BYTE, mybuffer.flatten())
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST)
         glGenerateMipmap(GL_TEXTURE_2D)
@@ -703,21 +712,20 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glBindTexture(GL_TEXTURE_2D, texture)
 
         gx = 2*32/self.W*self.scale['base']
-        color = np.array([0, 0, 0, 1,
-                 0, 1, 0, 1,
-                 1, 1, 0, 1,
-                 1, 0, 0, 1,
-                 0, 0, 0, 1,
-                 0, 0, 0, 1,
-                 0, 0, 0, 1,
-                 0, 0, 0, 1])
+        color = np.array([0, 1, 0, 1,
+                          0, 0, 0, 1,
+                          1, 0, 0, 1,
+                          1, 1, 0, 1,
+                          1, 1, 1, 1,
+                          1, 1, 1, 1,
+                          1, 1, 1, 1,
+                          1, 1, 1, 1])
         triangle = np.array([0, 1, 2, 0, 2, 3])
         mesh = np.array([4, 5, 5, 6, 5, 7])
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
         self.setGLBuffer(vertex, color)
         self.drawElementGL(GL_TRIANGLES, triangle, 3)
-        glUniform4f(glGetUniformLocation(self.ShaderProgram, "clr"), 1, 0, 0, 1)
-        self.drawElementGL(GL_LINES, mesh, 2)
+        self.drawElementGL(GL_LINES, mesh, 0)
 
     def drawGL(self):
         glClearColor(0.0, 0.0, 0.0, 1.0)
@@ -766,10 +774,12 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             block = obj.get('block', 0)
             for b in range(block):
                 self.setGLBuffer(obj['Vertices'][b], obj['Color'][b])
+                clr_mesh = 0
                 if self.show['triangle']:
+                    clr_mesh = 1
                     self.drawElementGL(GL_QUADS, obj['Trinagles'][b], 0)
                 if self.show['mesh']:
-                    self.drawElementGL(GL_LINES, obj['Mesh'][b], 1)
+                    self.drawElementGL(GL_LINES, obj['Mesh'][b], clr_mesh)
 
                 if self.show['contour']:
                     ctr = obj['Contour'][b]
@@ -777,45 +787,39 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                         self.setGLBuffer(ctr['Vertices'][c], ctr['Color'][c])
                         self.drawElementGL(GL_LINES, ctr['Mesh'][c], 0)
 
+        # draw the box without zooming
         scaleAll = self.scale['base']
         glUniform3f(vertexScale, scaleAll, scaleAll, 1)
-
         offsetAll['x'] = self.offset['base']['x']
         offsetAll['y'] = self.offset['base']['y']
-
         glUniform3f(vertexOffset, offsetAll['x'], offsetAll['y'], offsetAll['z'])
         if self.show['box']:
-            glUniform1i(glGetUniformLocation(self.ShaderProgram, "mesh"), 0)
             r = self.range
             vertex = np.array([r['xmin'], r['ymin'], r['zmin'],
-                      r['xmin'], r['ymax'], r['zmin'],
-                      r['xmax'], r['ymax'], r['zmin'],
-                      r['xmax'], r['ymin'], r['zmin'],
-                      r['xmin'], r['ymin'], r['zmax'],
-                      r['xmin'], r['ymax'], r['zmax'],
-                      r['xmax'], r['ymax'], r['zmax'],
-                      r['xmax'], r['ymin'], r['zmax']])
-            color = np.array([0, 0, 0, 1,
-                     0, 0, 0, 1,
-                     0, 0, 0, 1,
-                     0, 0, 0, 1,
-                     0, 0, 0, 1,
-                     0, 0, 0, 1,
-                     0, 0, 0, 1,
-                     0, 0, 0, 1])
+                               r['xmin'], r['ymax'], r['zmin'],
+                               r['xmax'], r['ymax'], r['zmin'],
+                               r['xmax'], r['ymin'], r['zmin'],
+                               r['xmin'], r['ymin'], r['zmax'],
+                               r['xmin'], r['ymax'], r['zmax'],
+                               r['xmax'], r['ymax'], r['zmax'],
+                               r['xmax'], r['ymin'], r['zmax']])
+            color = np.array([1, 1, 1, 1,
+                              1, 1, 1, 1,
+                              1, 1, 1, 1,
+                              1, 1, 1, 1,
+                              1, 1, 1, 1,
+                              1, 1, 1, 1,
+                              1, 1, 1, 1,
+                              1, 1, 1, 1])
             axis = np.array([0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6,
-                    6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7])
-            #vertex = [ v / 10 for v in vertex]
+                             6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7])
             self.setGLBuffer(vertex, color)
-            self.drawElementGL(GL_LINES, axis, 1)
+            self.drawElementGL(GL_LINES, axis, 0)
 
         if self.show['axis']:
             self.drawAxisGL()
 
     def draw(self):
-        #if not self.invalidate:
-        #    return
-        #self.invalidate = False
         self.doRotate()
         self.drawGL()
         self.drawHud()
@@ -829,16 +833,14 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             self._hudtext = self.hudtext
             letter = self.hudtext
             tdc = wx.MemoryDC()
-            tw, th = tdc.GetTextExtent(letter)
-            HudW, HudH = tw+20, th+10
-            bitmap = wx.Bitmap(HudW, HudH)
+            HudW, HudH = self.W, 32
+            bitmap = wx.Bitmap(HudW, HudH, depth=32)
             tdc.SelectObject(bitmap)
-            tdc.SetBackground(wx.Brush('white', wx.BRUSHSTYLE_TRANSPARENT))
-            tdc.Clear()
-            tdc.SetPen(wx.Pen('white'))
-            tdc.SetTextForeground(wx.WHITE)
-            tdc.SetFont(wx.Font(wx.FontInfo(13)))
-            tdc.DrawText(letter, 5, th/2)
+            gc = wx.GraphicsContext.Create(tdc)
+            font = wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+            gc.SetFont(font, wx.WHITE)
+            tw, th = gc.GetTextExtent(letter)
+            gc.DrawText(letter, 5, th/2)
             tdc.SelectObject(wx.NullBitmap)
             self._hudBuffer = np.zeros((HudW, HudH, 4), np.uint8)
             bitmap.CopyToBuffer(self._hudBuffer, wx.BitmapBufferFormat_RGBA)
@@ -848,7 +850,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glBindTexture(GL_TEXTURE_2D, texture)
 
         HudW, HudH = self._hudBuffer.shape[0:2]
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, HudW, HudH, 0, GL_RGBA, GL_UNSIGNED_BYTE, self._hudBuffer)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, HudW, HudH, 0, GL_RGBA,
+                     GL_UNSIGNED_BYTE, self._hudBuffer)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
         glGenerateMipmap(GL_TEXTURE_2D)
@@ -859,7 +862,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glBindTexture(GL_TEXTURE_2D, texture)
 
         vertex = np.array([-1, 1, 1,
-                           -1,1-2.*HudH/H, 1,
+                           -1, 1-2.*HudH/H, 1,
                            -1+2.*HudW/W, 1-2.*HudH/H, 1,
                            -1+2.*HudW/W, 1, 1])
         # texture coordinate
@@ -874,9 +877,6 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
 
     def redraw(self):
         self.Refresh()
-        #self.invalidate = True
-        #self.draw()
-        #window.requestAnimationFrame(function() { self.draw(); } )
 
     def rotate(self, x, y, z):
         if x != 0 or y != 0 or z != 0:
@@ -930,3 +930,4 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         Rz[1][1] = math.cos(sign*self.rotateTheta)
         Rz[2][2] = 1
         return Rz
+
