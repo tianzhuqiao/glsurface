@@ -15,13 +15,10 @@ vtxShaderSource = (
     "attribute vec3 VertexPosition;\n"
     "attribute vec4 VertexColor;\n"
     "uniform mat3 TransformationMatrix;\n"
-    "uniform mat4 PerspectiveMatrix;\n"
     "uniform vec3 VertexResolution;\n"
     "uniform vec3 VertexScale;\n"
     "uniform vec3 VertexOffset;\n"
-    "uniform vec3 VertexOffsetView;\n"
     "uniform vec3 VertexScaleGL;\n"
-    "uniform vec3 VertexOffsetGL;\n"
     "varying vec2 vTextureCoord;\n"
     "varying vec4 vColor;\n"
     "uniform int VertexOriginal;\n"
@@ -29,11 +26,11 @@ vtxShaderSource = (
     "    if(VertexOriginal == 1) {\n"
     "        gl_Position = vec4(VertexPosition, 1.0);\n"
     "    } else if (VertexOriginal == 2) {\n"
-    "        gl_Position = vec4((((VertexPosition-VertexOffsetView))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
-    "        gl_Position = gl_Position*vec4(VertexScaleGL,1)+vec4(VertexOffsetGL,0);\n"
+    "        gl_Position = vec4((((VertexPosition))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
+    "        gl_Position = gl_Position*vec4(VertexScaleGL,1);\n"
     "    } else {\n"
-    "        gl_Position = vec4(((TransformationMatrix*(VertexPosition-VertexOffsetView))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
-    "        gl_Position = gl_Position*vec4(VertexScaleGL,1)+vec4(VertexOffsetGL,0);\n"
+    "        gl_Position = vec4(((TransformationMatrix*(VertexPosition))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
+    "        gl_Position = gl_Position*vec4(VertexScaleGL,1);\n"
     "    }\n"
     "    vColor = VertexColor;\n"
     "}\n")
@@ -60,7 +57,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def __init__(self, parent, points=None):
         # set the depth size, otherwise the depth test may not work correctly.
         attribs = [glcanvas.WX_GL_RGBA, glcanvas.WX_GL_DOUBLEBUFFER,
-                   glcanvas.WX_GL_DEPTH_SIZE, 32]
+                   glcanvas.WX_GL_DEPTH_SIZE, 16]
         glcanvas.GLCanvas.__init__(self, parent, -1, attribList=attribs)
         self.init = False
         self.context = glcanvas.GLContext(self)
@@ -134,11 +131,11 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def OnSize(self, event):
         # update the size
         self.resize()
-        self.redraw()
+        self.Refresh()
         event.Skip()
 
     def OnPaint(self, event):
-        dc = wx.PaintDC(self)
+        #dc = wx.PaintDC(self)
         self.SetCurrent(self.context)
         if not self.initialized:
             self.InitGL()
@@ -187,17 +184,12 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         # generate the buffer
         self.glBufs = glGenBuffers(3)
         self.glTextures = glGenTextures(2)
-
-    def MakePerspective(self, FOV, AspectRatio, Closest, Farest):
-        YLimit = Closest * math.tan(FOV * math.pi / 360)
-        A = -(Farest + Closest)/(Farest - Closest)
-        B = -2 * Farest * Closest / (Farest - Closest)
-        C = (2 * Closest)/((YLimit * AspectRatio) * 2)
-        D = (2 * Closest)/(YLimit * 2)
-        return [C, 0, 0, 0,
-                0, D, 0, 0,
-                0, 0, A, -1,
-                0, 0, B, 0]
+        self.vtxResolution = glGetUniformLocation(self.ShaderProgram, "VertexResolution")
+        self.vtxOffset = glGetUniformLocation(self.ShaderProgram, "VertexOffset")
+        self.vtxMatrix = glGetUniformLocation(self.ShaderProgram, "TransformationMatrix")
+        self.vtxScaleGL = glGetUniformLocation(self.ShaderProgram, "VertexScaleGL")
+        self.vtxScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
+        self.fraguSampler = glGetUniformLocation(self.ShaderProgram, "uSampler")
 
     def OnKeyDown(self, event):
         keycode = event.GetKeyCode()
@@ -238,7 +230,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                 self.offset['user']['y'] += self.dragEnd['y'] - self.dragStart['y']
                 self.dragStart['x'] = self.dragEnd['x']
                 self.dragStart['y'] = self.dragEnd['y']
-                self.redraw()
+                self.Refresh()
             else:
                 if abs(self.dragStart['x']-self.dragEnd['x']) > 1 or \
                    abs(self.dragStart['y']-self.dragEnd['y']) > 1:
@@ -252,11 +244,11 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def OnMouseUp(self, event):
         self.mouseIsDown = False
         self.isDragging = False
-        self.redraw()
+        self.Refresh()
 
     def OnDoubleClick(self, event):
         self.reset()
-        self.redraw()
+        self.Refresh()
 
     def OnMouseWheel(self, event):
         delta = (event.GetWheelRotation() > 0)*2-1
@@ -271,7 +263,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             user = self.offset['user']
             user['x'] = x - (x-base['x']-user['x'])*zoom - base['x']
             user['y'] = y - (y-base['y']-user['y'])*zoom - base['y']
-            self.redraw()
+            self.Refresh()
 
     def reset(self):
         self.rotation = {'x':0, 'y':0, 'z':0}
@@ -332,7 +324,10 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             refresh = True
             genGLobj = True
         if 'zrange' in param:
-            self.zrange = param['zrange']
+            self.zrange = []
+            if len(param['zrange']) == 2:
+                self.zrange = param['zrange']
+
         if 'hud' in param:
             self.hudtext = param['hud']
         if 'selected' in param:
@@ -374,11 +369,11 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             self.dimension = {'x': zdim[1]+1, 'y':zdim[0]+1}
             xmin, ymin, zmin = np.min(Px), np.min(Py), np.min(Pz)
             xmax, ymax, zmax = np.max(Px), np.max(Py), np.max(Pz)
+            if self.zrange:
+                zmin, zmax = self.zrange
             self.dataOffset['x'] = (xmax+xmin)/2
             self.dataOffset['y'] = (ymax+ymin)/2
             self.dataOffset['z'] = (zmax+zmin)/2
-            if self.zrange:
-                zmin, zmax = self.zrange
             o = self.dataOffset
             zg = 1
             if zmax-zmin > 0:
@@ -404,7 +399,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             # the objects will be re-generated before drawing
             self.glObject = None
         if refresh:
-            self.redraw()
+            self.Refresh()
 
     def calc_contour(self, v, level):
         # calculate the contour of level within a triangle defined by v
@@ -508,12 +503,13 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                     mesh.append(len(vertex)-1)
                     colour.append(clr)
                     colour.append(clr)
-        vertex = (np.array(vertex)+[ox, oy, oz]).flatten()
-        colour = np.array(colour).flatten()
-        mesh = np.array(mesh).flatten()
-        vertexAll.append(vertex)
-        meshAll.append(mesh)
-        colourAll.append(colour)
+        if vertex:
+            vertex = (np.array(vertex)+[ox, oy, oz]).flatten()
+            colour = np.array(colour).flatten()
+            mesh = np.array(mesh).flatten()
+            vertexAll.append(vertex)
+            meshAll.append(mesh)
+            colourAll.append(colour)
         return {'Vertices': vertexAll, 'Mesh': meshAll, 'Color': colourAll}
 
     def prepareGL(self):
@@ -735,19 +731,10 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         vertexResolution = glGetUniformLocation(self.ShaderProgram, "VertexResolution")
         glUniform3f(vertexResolution, self.W, self.H, self.W)
 
-        vertexOffsetView = glGetUniformLocation(self.ShaderProgram, "VertexOffsetView")
-        glUniform3f(vertexOffsetView, 0, 0, 0)
-
         vertexOffset = glGetUniformLocation(self.ShaderProgram, "VertexOffset")
-        offsetAll = {}
-        offsetAll['x'] = self.offset['base']['x']+self.offset['user']['x']
-        offsetAll['y'] = self.offset['base']['y']+self.offset['user']['y']
-        offsetAll['z'] = 0
-        glUniform3f(vertexOffset, offsetAll['x'], offsetAll['y'], offsetAll['z'])
-        #Generate The Perspective Matrix
-        #var PerspectiveMatrix = this.MakePerspective(45, this.AspectRatio, 1, 10000.0)
-        #var pmatrix = this.GL.getUniformLocation(this.ShaderProgram, "PerspectiveMatrix")
-        #this.GL.uniformMatrix4fv(pmatrix, false, new Float32Array(PerspectiveMatrix))
+        ox = self.offset['base']['x']+self.offset['user']['x']
+        oy = self.offset['base']['y']+self.offset['user']['y']
+        glUniform3f(vertexOffset, ox, oy, 0)
 
         #Set Transformation Matrices
         TransformMatrix = self.transformMatrix.flatten('F')
@@ -763,9 +750,6 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         vertexScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
         scaleAll = self.scale['base']*self.scale['zoom']
         glUniform3f(vertexScale, scaleAll, scaleAll, 1)
-
-        vertexOffsetGL = glGetUniformLocation(self.ShaderProgram, "VertexOffsetGL")
-        glUniform3f(vertexOffsetGL, 0, 0, 0)
 
         if self.show['triangle'] or self.show['mesh'] or self.show['contour']:
             if not self.glObject:
@@ -787,12 +771,15 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                         self.setGLBuffer(ctr['Vertices'][c], ctr['Color'][c])
                         self.drawElementGL(GL_LINES, ctr['Mesh'][c], 0)
 
+    def drawBox(self):
         # draw the box without zooming
+        vertexScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
         scaleAll = self.scale['base']
         glUniform3f(vertexScale, scaleAll, scaleAll, 1)
-        offsetAll['x'] = self.offset['base']['x']
-        offsetAll['y'] = self.offset['base']['y']
-        glUniform3f(vertexOffset, offsetAll['x'], offsetAll['y'], offsetAll['z'])
+        ox = self.offset['base']['x']
+        oy = self.offset['base']['y']
+        vertexOffset = glGetUniformLocation(self.ShaderProgram, "VertexOffset")
+        glUniform3f(vertexOffset, ox, oy, 0)
         if self.show['box']:
             r = self.range
             vertex = np.array([r['xmin'], r['ymin'], r['zmin'],
@@ -820,15 +807,14 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             self.drawAxisGL()
 
     def draw(self):
-        self.doRotate()
         self.drawGL()
+        self.drawBox()
         self.drawHud()
 
     def drawHud(self):
         if not self._hudtext and not self.hudtext:
             return
-        W = int(self.W)
-        H = int(self.H)
+        W, H = int(self.W), int(self.H)
         HudW, HudH = self._hudBuffer.shape[0:2]
         if self._hudtext != self.hudtext or HudW < W:
             self._hudtext = self.hudtext
@@ -838,7 +824,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             bitmap = wx.Bitmap(HudW, HudH, depth=32)
             tdc.SelectObject(bitmap)
             gc = wx.GraphicsContext.Create(tdc)
-            font = wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+            font = wx.Font(14, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
             gc.SetFont(font, wx.WHITE)
             gc.DrawText(letter, 5, 5)
             tdc.SelectObject(wx.NullBitmap)
@@ -869,24 +855,11 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                           1, 1, 0, 1,
                           1, 0, 0, 1])
         triangle = np.array([0, 1, 2, 3])
-        glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
+        glUniform1i(self.fraguSampler, 0)
         self.setGLBuffer(vertex, color)
         self.drawElementGL(GL_QUADS, triangle, 3, 1)
 
-    def redraw(self):
-        self.Refresh()
-
     def rotate(self, x, y, z):
-        if x != 0 or y != 0 or z != 0:
-            self.rotation['x'] += x
-            self.rotation['y'] += y
-            self.rotation['z'] += z
-            self.redraw()
-
-    def doRotate(self):
-        x = self.rotation['x']
-        y = self.rotation['y']
-        z = self.rotation['z']
         if x == 0 and y == 0 and z == 0:
             return
         R = self.transformMatrix
@@ -901,6 +874,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             R = np.matmul(Rz, R)
         self.rotation = {'x':0, 'y':0, 'z':0}
         self.transformMatrix = R
+        self.Refresh()
 
     def xRotateMatrix(self, sign):
         Rx = np.zeros((3, 3), np.float32)
