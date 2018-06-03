@@ -99,6 +99,7 @@ class SimpleBarBuf(object):
 
 
 class SimpleSurfaceCanvas(glcanvas.GLCanvas):
+    ID_SHOW_2D = wx.NewId()
     ID_SHOW_TRIANGLE = wx.NewId()
     ID_SHOW_MESH = wx.NewId()
     ID_SHOW_CONTOUR = wx.NewId()
@@ -141,6 +142,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.colorScale = []
         self.blocks = []
         self.zAutoScale = 1
+        self.zgain = 1.
         # 2d mode is the fast-drawing mode, only shows the 2D image
         self.mode_2d = False
         self.show = {'triangle': True, 'mesh': False, 'contour': False,
@@ -200,6 +202,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def GetContextMenu(self):
         menu = wx.Menu()
         elements = wx.Menu()
+        elements.Append(self.ID_SHOW_2D, 'Show 2D Mode\tshift+t', '', wx.ITEM_CHECK)
+        elements.AppendSeparator()
         elements.Append(self.ID_SHOW_TRIANGLE, 'Show Triangle\tshift+t', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_MESH, 'Show Mesh', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_CONTOUR, 'Show Contour', '', wx.ITEM_CHECK)
@@ -243,7 +247,9 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def OnProcessMenuEvent(self, event):
         eid = event.GetId()
         show = {}
-        if eid == self.ID_SHOW_TRIANGLE:
+        if eid == self.ID_SHOW_2D:
+            self.Set2dMode(True)
+        elif eid == self.ID_SHOW_TRIANGLE:
             show['triangle'] = not self.show['triangle']
         elif eid == self.ID_SHOW_MESH:
             show['mesh'] = not self.show['mesh']
@@ -275,7 +281,9 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
 
     def OnUpdateMenu(self, event):
         eid = event.GetId()
-        if eid == self.ID_SHOW_TRIANGLE:
+        if eid == self.ID_SHOW_2D:
+            event.Check(self.mode_2d)
+        elif eid == self.ID_SHOW_TRIANGLE:
             event.Check(self.show['triangle'])
         elif eid == self.ID_SHOW_MESH:
             event.Check(self.show['mesh'])
@@ -701,6 +709,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         zmax = (zmax-o['z'])*zg
         self.range = {'xmin':xmin, 'ymin':ymin, 'zmin':zmin,
                       'xmax':xmax, 'ymax':ymax, 'zmax':zmax}
+        self.SetRangeZ([])
         self.resize()
 
         self.UpdateHudText()
