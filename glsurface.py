@@ -3,6 +3,7 @@
 import wx
 import sys
 import math
+import six
 import numpy as np
 from wx import glcanvas
 import OpenGL
@@ -11,55 +12,110 @@ OpenGL.ERROR_LOGGING = False
 OpenGL.ERROR_ON_COPY = True
 from OpenGL.GL import *
 
-vtxShaderSource = (
-    "attribute vec3 VertexPosition;\n"
-    "attribute vec4 VertexColor;\n"
-    "uniform mat3 TransformationMatrix;\n"
-    "uniform vec3 VertexResolution;\n"
-    "uniform vec3 VertexScale;\n"
-    "uniform vec3 VertexOffset;\n"
-    "uniform vec3 VertexScaleGL;\n"
-    "varying vec2 vTextureCoord;\n"
-    "varying vec4 vColor;\n"
-    "uniform int VertexOriginal;\n"
-    "void main(void) {\n"
-    "    if(VertexOriginal == 1) {\n"
-    "        gl_Position = vec4(VertexPosition, 1.0);\n"
-    "    } else if (VertexOriginal == 2) {\n"
-    "        gl_Position = vec4((((VertexPosition))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
-    "        gl_Position = gl_Position*vec4(VertexScaleGL,1);\n"
-    "    } else {\n"
-    "        gl_Position = vec4(((TransformationMatrix*(VertexPosition))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);\n"
-    "        gl_Position = gl_Position*vec4(VertexScaleGL,1);\n"
-    "    }\n"
-    "    vColor = VertexColor;\n"
-    "}\n")
+vtxShaderSource = """
+attribute vec3 VertexPosition;
+attribute vec4 VertexColor;
+uniform mat3 TransformationMatrix;
+uniform vec3 VertexResolution;
+uniform vec3 VertexScale;
+uniform vec3 VertexOffset;
+uniform vec3 VertexScaleGL;
+varying vec2 vTextureCoord;
+varying vec4 vColor;
+uniform int VertexOriginal;
+void main(void) {
+    if(VertexOriginal == 1) {
+        gl_Position = vec4(VertexPosition, 1.0);
+    } else if (VertexOriginal == 2) {
+        gl_Position = vec4((((VertexPosition))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);
+        gl_Position = gl_Position*vec4(VertexScaleGL,1);
+    } else {
+        gl_Position = vec4(((TransformationMatrix*(VertexPosition))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);
+        gl_Position = gl_Position*vec4(VertexScaleGL,1);
+    }
+    vColor = VertexColor;
+}
+"""
 
-fragShaderSource = (
-    "varying vec4 vColor;\n"
-    "uniform int mesh;\n"
-    "uniform vec4 clr;\n"
-    "uniform sampler2D uSampler;\n"
-    "void main(void) {\n"
-    "    if(mesh == 0) {\n"
-    "        gl_FragColor = vColor;\n"
-    "    } else if(mesh == 1) {\n"
-    "        gl_FragColor = vec4(0, 0, 1, 0.5);\n"
-    "    } else if(mesh == 2) {\n"
-    "        gl_FragColor = clr;\n"
-    "    } else if(mesh == 3) {\n"
-    "        vec4 textureColor = texture2D(uSampler, vec2(vColor[0], vColor[1]));\n"
-    "        gl_FragColor = vec4(textureColor.rgb , textureColor.a);\n"
-    "    }\n"
-    "}\n")
+fragShaderSource = """
+varying vec4 vColor;
+uniform int mesh;
+uniform vec4 clr;
+uniform sampler2D uSampler;
+void main(void) {
+    if(mesh == 0) {
+        gl_FragColor = vColor;
+    } else if(mesh == 1) {
+        gl_FragColor = vec4(0, 0, 1, 0.5);
+    } else if(mesh == 2) {
+        gl_FragColor = clr;
+    } else if(mesh == 3) {
+        vec4 textureColor = texture2D(uSampler, vec2(vColor[0], vColor[1]));
+        gl_FragColor = vec4(textureColor.rgb , textureColor.a);
+    }
+}
+"""
+
+class SimpleBarBuf(object):
+    def __init__(self, sz, rng, horz):
+        self.resize(sz, rng, horz)
+
+    def resize(self, sz, rng, horz, clr=[0, 0.6, 0, 1]):
+        self.range = rng
+        self.dSize = sz
+        self.horz = horz
+        self.vertex = np.zeros((sz*4, 3))
+        self.vertex[:, 2].fill(rng['zmax'])
+        if horz:
+            # for point d[i], draw lines between points:
+            # (i, ymax), (i, ymax-d[i]*g), (i+1, ymax-d[i]*g), (i+1, ymax)
+            # see update() for detail
+            xmax, xmin = self.range['xmax'], self.range['xmin']
+            x = np.linspace(xmin, xmax, sz, endpoint=False).reshape((sz, 1))
+            delta = (xmax-xmin)/sz
+            self.vertex[:, 0] = (np.repeat(x, 4, axis=1) + [0, 0, delta, delta]).flatten()
+        else:
+            ymax, ymin = self.range['ymax'], self.range['ymin']
+            y = np.linspace(ymin, ymax, sz, endpoint=False).reshape((sz, 1))
+            delta = (ymax-ymin)/sz
+            self.vertex[:, 1] = (np.repeat(y, 4, axis=1) + [0, 0, delta, delta]).flatten()
+
+        self.color = np.repeat(np.array([clr]), sz*4, axis=0)
+        self.line = np.arange(sz*4)
+
+    def glObject(self):
+        return self.vertex.flatten(), self.color, self.line
+
+    def update(self, d, g):
+        if len(d) != self.dSize:
+            raise ValueError()
+        zmax = self.range['zmax']
+        if self.horz:
+            ymax, ymin = self.range['ymax'], self.range['ymin']
+            self.vertex[:, 1] = ymax-(np.kron(d, [0, 1, 1, 0])).flatten()*g*ymax/zmax
+        else:
+            xmax, xmin = self.range['xmax'], self.range['xmin']
+            self.vertex[:, 0] = xmax-(np.kron(d, [0, 1, 1, 0])).flatten()*g*xmax/zmax
+
 
 class SimpleSurfaceCanvas(glcanvas.GLCanvas):
+    ID_SHOW_TRIANGLE = wx.NewId()
+    ID_SHOW_MESH = wx.NewId()
+    ID_SHOW_CONTOUR = wx.NewId()
+    ID_SHOW_BOX = wx.NewId()
+    ID_SHOW_AXIS = wx.NewId()
+    ID_SHOW_HORZ_BAR = wx.NewId()
+    ID_SHOW_VERT_BAR = wx.NewId()
+    ID_ROTATE_0 = wx.NewId()
+    ID_ROTATE_90 = wx.NewId()
+    ID_ROTATE_180 = wx.NewId()
+    ID_ROTATE_270 = wx.NewId()
+
     def __init__(self, parent, points=None):
         # set the depth size, otherwise the depth test may not work correctly.
         attribs = [glcanvas.WX_GL_RGBA, glcanvas.WX_GL_DOUBLEBUFFER,
                    glcanvas.WX_GL_DEPTH_SIZE, 16]
         glcanvas.GLCanvas.__init__(self, parent, -1, attribList=attribs)
-        self.init = False
         self.context = glcanvas.GLContext(self)
 
         self.dragStart = {'x':0, 'y':0}
@@ -70,6 +126,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.mouseIsDown = False
         self.isDragging = False
         self.rotation = {'x':110, 'y':0, 'z':110}
+        self.default_rotate = 0
         sz = self.GetClientSize()
         self.W = sz.x
         self.H = sz.y
@@ -80,12 +137,15 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.margin = {'top':50, 'bottom':10, 'left':1, 'right':1}
         self.offset = {'base':{'x':0, 'y':0}, 'user':{'x':0, 'y':0}}
         self.dataOffset = {'x':0, 'y':0, 'z':0}
-        self.selected = {'x':-1, 'y':-1, 'clr':[1, 0, 1, 1]}
+        self.selected = {'x':0, 'y':0, 'clr':[1, 0, 1, 1]}
         self.colorScale = []
         self.blocks = []
         self.zAutoScale = 1
+        # 2d mode is the fast-drawing mode, only shows the 2D image
+        self.mode_2d = False
         self.show = {'triangle': True, 'mesh': False, 'contour': False,
-                     'box':False, 'axis':False}
+                     'box':False, 'axis':False, 'horz_bar': False,
+                     'vert_bar': False}
         self.contourLevels = 100
         self.transformMatrix = np.eye(3, dtype=np.float32)
         self.colorMap = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1],
@@ -98,7 +158,16 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.hudtext = ''
         self._hudtext = ''
         self._hudBuffer = np.zeros((0, 0, 4))
+        # buffers to draw bar
+        rows, cols = self.rawPoints['z'].shape
+        self.horzbar_buf = SimpleBarBuf(cols, self.range, True)
+        self.vertbar_buf = SimpleBarBuf(rows, self.range, False)
+        self.SetImage(self.rawPoints)
+
         self.reset()
+
+        accel_tbl = self.GetAccelList()
+        self.SetAcceleratorTable(wx.AcceleratorTable(accel_tbl))
 
         self.Bind(wx.EVT_ERASE_BACKGROUND, self.OnEraseBackground)
         self.Bind(wx.EVT_SIZE, self.OnSize)
@@ -109,9 +178,129 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown)
         self.Bind(wx.EVT_LEFT_DCLICK, self.OnDoubleClick)
         self.Bind(wx.EVT_MOUSEWHEEL, self.OnMouseWheel)
+        self.Bind(wx.EVT_CONTEXT_MENU, self.OnContextMenu)
+        self.Bind(wx.EVT_MENU, self.OnProcessMenuEvent)
+        self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenu)
+
+    def GetAccelList(self):
+        accel_tbl = [(wx.ACCEL_SHIFT, ord('T'), self.ID_SHOW_TRIANGLE),
+                     (wx.ACCEL_SHIFT, ord('H'), self.ID_SHOW_HORZ_BAR),
+                     (wx.ACCEL_SHIFT, ord('V'), self.ID_SHOW_VERT_BAR),
+                    ]
+        return accel_tbl
 
     def OnEraseBackground(self, event):
         pass # Do nothing, to avoid flashing on MSW.
+
+    def OnContextMenu(self, event):
+        menu = self.GetContextMenu()
+        if menu:
+            self.PopupMenu(menu)
+
+    def GetContextMenu(self):
+        menu = wx.Menu()
+        elements = wx.Menu()
+        elements.Append(self.ID_SHOW_TRIANGLE, 'Show Triangle\tshift+t', '', wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_MESH, 'Show Mesh', '', wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_CONTOUR, 'Show Contour', '', wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_BOX, 'Show Box', '', wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_AXIS, 'Show Axis', '', wx.ITEM_CHECK)
+        elements.AppendSeparator()
+        elements.Append(self.ID_SHOW_HORZ_BAR, 'Show Horz Bar\tshift+h', '', wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_VERT_BAR, 'Show Vert Bar\tshift+v', '', wx.ITEM_CHECK)
+        menu.AppendSeparator()
+        menu.AppendSubMenu(elements, 'Elements')
+        rotate = wx.Menu()
+        rotate.Append(self.ID_ROTATE_0, 'Rotate 0 degree', '', wx.ITEM_CHECK)
+        rotate.Append(self.ID_ROTATE_90, 'Rotate 90 degree', '', wx.ITEM_CHECK)
+        rotate.Append(self.ID_ROTATE_180, 'Rotate 180 degree', '', wx.ITEM_CHECK)
+        rotate.Append(self.ID_ROTATE_270, 'Rotate 270 degree', '', wx.ITEM_CHECK)
+        menu.AppendSeparator()
+        menu.AppendSubMenu(rotate, 'Orientation')
+        return menu
+
+    def Set2dMode(self, is2d):
+        self.mode_2d = is2d
+        if not self.mode_2d:
+            self.SetImage(self.rawPoints)
+
+    def SetShowMode(self, **kwargs):
+        refresh = False
+        genGLobj = False
+        for key in six.iterkeys(kwargs):
+            if key in self.show and self.show[key] != kwargs[key]:
+                self.show[key] = kwargs[key]
+                refresh = True
+                if key in ['mesh', 'contour']:
+                    genGLobj = True
+        if genGLobj:
+            self.color()
+            # the objects will be re-generated before drawing
+            self.glObject = None
+        if refresh:
+            self.Refresh()
+
+    def OnProcessMenuEvent(self, event):
+        eid = event.GetId()
+        show = {}
+        if eid == self.ID_SHOW_TRIANGLE:
+            show['triangle'] = not self.show['triangle']
+        elif eid == self.ID_SHOW_MESH:
+            show['mesh'] = not self.show['mesh']
+        elif eid == self.ID_SHOW_CONTOUR:
+            show['contour'] = not self.show['contour']
+        elif eid == self.ID_SHOW_BOX:
+            show['box'] = not self.show['box']
+        elif eid == self.ID_SHOW_AXIS:
+            show['axis'] = not self.show['axis']
+        elif eid == self.ID_SHOW_HORZ_BAR:
+            show['horz_bar'] = not self.show['horz_bar']
+        elif eid == self.ID_SHOW_VERT_BAR:
+            show['vert_bar'] = not self.show['vert_bar']
+        else:
+            if eid == self.ID_ROTATE_0:
+                self.default_rotate = 0
+            elif eid == self.ID_ROTATE_90:
+                self.default_rotate = 90
+            elif eid == self.ID_ROTATE_180:
+                self.default_rotate = 180
+            elif eid == self.ID_ROTATE_270:
+                self.default_rotate = 270
+            self.reset()
+            self.resize()
+            self.Refresh()
+            return
+        if show:
+            self.SetShowMode(**show)
+
+    def OnUpdateMenu(self, event):
+        eid = event.GetId()
+        if eid == self.ID_SHOW_TRIANGLE:
+            event.Check(self.show['triangle'])
+        elif eid == self.ID_SHOW_MESH:
+            event.Check(self.show['mesh'])
+            event.Enable(not self.mode_2d)
+        elif eid == self.ID_SHOW_CONTOUR:
+            event.Check(self.show['contour'])
+            event.Enable(not self.mode_2d)
+        elif eid == self.ID_SHOW_BOX:
+            event.Check(self.show['box'])
+            event.Enable(not self.mode_2d)
+        elif eid == self.ID_SHOW_AXIS:
+            event.Check(self.show['axis'])
+            event.Enable(not self.mode_2d)
+        elif eid == self.ID_SHOW_HORZ_BAR:
+            event.Check(self.show['horz_bar'])
+        elif eid == self.ID_SHOW_VERT_BAR:
+            event.Check(self.show['vert_bar'])
+        elif eid == self.ID_ROTATE_0:
+            event.Check(self.default_rotate == 0)
+        elif eid == self.ID_ROTATE_90:
+            event.Check(self.default_rotate == 90)
+        elif eid == self.ID_ROTATE_180:
+            event.Check(self.default_rotate == 180)
+        elif eid == self.ID_ROTATE_270:
+            event.Check(self.default_rotate == 270)
 
     def resize(self):
         sz = self.GetClientSize()
@@ -120,6 +309,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glViewport(0, 0, self.W, self.H)
         xmax, xmin = self.range['xmax'], self.range['xmin']
         ymax, ymin = self.range['ymax'], self.range['ymin']
+        if self.default_rotate in [90, 270]:
+            xmax, xmin, ymax, ymin = ymax, ymin, xmax, xmin
         if xmax-xmin > 0 and ymax-ymin >= 0:
             t = self.margin['top']
             b = self.margin['bottom']
@@ -140,7 +331,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         if not self.initialized:
             self.InitGL()
             if self.rawPoints is not None:
-                self.update({'points':self.rawPoints})
+                self.SetImage(self.rawPoints)
             self.initialized = True
         self.draw()
         self.SwapBuffers()
@@ -183,7 +374,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glViewport(0, 0, self.W, self.H)
         # generate the buffer
         self.glBufs = glGenBuffers(3)
-        self.glTextures = glGenTextures(2)
+        self.glTextures = glGenTextures(3) # axis, hud, 2d image
         self.vtxResolution = glGetUniformLocation(self.ShaderProgram, "VertexResolution")
         self.vtxOffset = glGetUniformLocation(self.ShaderProgram, "VertexOffset")
         self.vtxMatrix = glGetUniformLocation(self.ShaderProgram, "TransformationMatrix")
@@ -192,25 +383,62 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.fraguSampler = glGetUniformLocation(self.ShaderProgram, "uSampler")
 
     def OnKeyDown(self, event):
-        keycode = event.GetKeyCode()
-        x, y, z = 0, 0, 0
-        if keycode == wx.WXK_UP:
-            x = 1
-        elif keycode == wx.WXK_DOWN:
-            x = -1
-        elif keycode == wx.WXK_LEFT:
-            if event.CmdDown():
-                z = -1
+        if event.ShiftDown():
+            if self.mode_2d:
+                event.Skip()
+                return
+            keycode = event.GetKeyCode()
+            x, y, z = 0, 0, 0
+            if keycode == wx.WXK_UP:
+                x = 1
+            elif keycode == wx.WXK_DOWN:
+                x = -1
+            elif keycode == wx.WXK_LEFT:
+                if event.CmdDown():
+                    z = -1
+                else:
+                    y = -1
+            elif keycode == wx.WXK_RIGHT:
+                if event.CmdDown():
+                    z = 1
+                else:
+                    y = 1
             else:
-                y = -1
-        elif keycode == wx.WXK_RIGHT:
-            if event.CmdDown():
-                z = 1
-            else:
-                y = 1
+                event.Skip()
+            self.rotate(x, y, z)
         else:
-            event.Skip()
-        self.rotate(x, y, z)
+            if self.dimension['x'] <= 0 or self.dimension['y'] <= 0:
+                return
+            keycode = event.GetKeyCode()
+            x = self.selected['x']
+            y = self.selected['y']
+            mx = self.dimension['x'] - 1
+            my = self.dimension['y'] - 1
+            delta = 1
+            dx, dy = 0, 0
+            if event.CmdDown():
+                delta = 5
+            if keycode == wx.WXK_UP:
+                dy = -delta
+            elif keycode == wx.WXK_DOWN:
+                dy = delta
+            elif keycode == wx.WXK_LEFT:
+                dx = -delta
+            elif keycode == wx.WXK_RIGHT:
+                dx = delta
+            else:
+                event.Skip()
+                return
+            # adjust the movement based on the current orientation
+            if self.default_rotate == 90:
+                dx, dy = dy, -dx
+            elif self.default_rotate == 180:
+                dx, dy = -dx, -dy
+            elif self.default_rotate == 270:
+                dx, dy = -dy, dx
+            y = (y+dy)%my
+            x = (x+dx)%mx
+            self.SetSelected({'x': x, 'y':y})
 
     def OnMouseDown(self, event):
         bRect = self.GetClientRect()
@@ -231,7 +459,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                 self.dragStart['x'] = self.dragEnd['x']
                 self.dragStart['y'] = self.dragEnd['y']
                 self.Refresh()
-            else:
+            elif not self.mode_2d:
+                # only all rotate in 3d mode
                 if abs(self.dragStart['x']-self.dragEnd['x']) > 1 or \
                    abs(self.dragStart['y']-self.dragEnd['y']) > 1:
                     self.isDragging = True
@@ -266,10 +495,13 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             self.Refresh()
 
     def reset(self):
+        # reset rotation, zoom, offset
         self.rotation = {'x':0, 'y':0, 'z':0}
         self.transformMatrix = np.eye(3, dtype=np.float32)
         self.scale['zoom'] = 1
         self.offset['user'] = {'x':0, 'y':0}
+        # set the default orientation
+        self.rotate(0, 0, self.default_rotate/180*np.pi/self.rotateTheta)
 
     def getColorByZ(self, z):
         zMin = self.range['zmin']
@@ -297,109 +529,185 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         if sel >= 0 and sel < self.points.shape[0]:
             self.pointsClr[sel, :] = self.selected['clr']
 
-    def update(self, param):
-        genGLobj = False
-        refresh = False
-        if "colorscale" in param:
-            self.colorScale = param['colorscale']
-        if "showtriangle" in param and self.show['triangle'] != param['showtriangle']:
-            self.show['triangle'] = param['showtriangle']
-            refresh = True
-        if "showmesh" in param and self.show['mesh'] != param['showmesh']:
-            self.show['mesh'] = param['showmesh']
-            refresh = True
-            genGLobj = True
-        if "showcontour" in param and self.show['contour'] != param['showcontour']:
-            self.show['contour'] = param['showcontour']
-            refresh = True
-            genGLobj = True
-        if "showbox" in param and self.show['box'] != param['showbox']:
-            self.show['box'] = param['showbox']
-            refresh = True
-        if "showaxis" in param and self.show['axis'] != param['showaxis']:
-            self.show['axis'] = param['showaxis']
-            refresh = True
-        if "contourlevel" in param and self.contourLevels != param['contourlevel']:
-            self.contourLevels = param['contourlevel']
-            refresh = True
-            genGLobj = True
-        if 'zrange' in param:
-            self.zrange = []
-            if len(param['zrange']) == 2:
-                self.zrange = param['zrange']
+    def setContourLevels(self, level):
+        if level == self.contourLevels:
+            return
+        self.contourLevels = level
 
-        if 'hud' in param:
-            self.hudtext = param['hud']
-        if 'selected' in param:
-            self.selected.update(param['selected'])
-            genGLobj = True
-            refresh = True
-        if "colormap" in param:
-            self.colorMap = param['colormap']
-            updateClr = True
-            genGLobj = True
-            refresh = True
+        # the objects will be re-generated before drawing
+        self.glObject = None
+        self.Refresh()
 
-        if 'points' in param:
-            #self.reset()
-            self.points = []
-            points = param['points']
-            self.rawPoints = points
-            zdim = points['z'].shape
-            xy = np.meshgrid(np.arange(0, zdim[1]+1), np.arange(0, zdim[0]+1))
-            if 'x' not in points:
-                Px = xy[0]
-            else:
-                Px = np.zeros((zdim[0]+1, zdim[1]+1))
-                Px[0:zdim[0], 0:zdim[1]] = points['x']
-                Px[-1, 0:zdim[1]] = points['x'][-1, :]
-                Px[:, -1] = Px[:, -2]*2 - Px[:, -3]
-            if 'y' not in points:
-                Py = xy[1]
-            else:
-                Py = np.zeros((zdim[0]+1, zdim[1]+1))
-                Py[0:zdim[0], 0:zdim[1]] = points['y']
-                Py[0:zdim[0], -1] = points['y'][:, -1]
-                Py[-1, :] = Py[-2, :]*2 - Py[-3, :]
-
-            Pz = np.zeros((zdim[0]+1, zdim[1]+1))
-            Pz[0:zdim[0], 0:zdim[1]] = points['z']
-            Pz[-1, 0:zdim[1]] = points['z'][-1, :]
-            Pz[:, -1] = Pz[:, -2]
-            self.dimension = {'x': zdim[1]+1, 'y':zdim[0]+1}
-            xmin, ymin, zmin = np.min(Px), np.min(Py), np.min(Pz)
-            xmax, ymax, zmax = np.max(Px), np.max(Py), np.max(Pz)
-            if self.zrange:
-                zmin, zmax = self.zrange
-            self.dataOffset['x'] = (xmax+xmin)/2
-            self.dataOffset['y'] = (ymax+ymin)/2
-            self.dataOffset['z'] = (zmax+zmin)/2
-            o = self.dataOffset
+    def SetRangeZ(self, zrange):
+        # Set the range of the image values; otherwise it is calculated from
+        # the data itself. It will impact the color of each pixel. Instead of
+        # fully utilizing all the colors in color map, we may need to fix the
+        # color code for each value (e.g., 0 is always blue)
+        self.zrange = []
+        if len(zrange) == 2:
+            self.zrange = zrange
+            zmin, zmax = self.zrange
+        elif self.rawPoints:
+            z = self.rawPoints['z']
+            zmin, zmax = np.min(z), np.max(z)
+        else:
+            zmin, zmax = 0, 1
+        self.dataOffset['z'] = o = (zmax+zmin)/2
+        ymax, ymin = self.range['ymax'], self.range['ymin']
+        zg = 1
+        if zmax-zmin > 0:
+            zg = float(ymax-ymin)/(zmax-zmin)
+        if zg == 0:
             zg = 1
-            if zmax-zmin > 0:
-                zg = (ymax-ymin)/(zmax-zmin)
-            self.zAutoScale = zg
-            self.points = np.zeros((Pz.size, 3))
-            self.points[:, 0] = (Px - o['x']).T.flatten()
-            self.points[:, 1] = (Py - o['y']).T.flatten()
-            self.points[:, 2] = ((Pz - o['z'])*zg).T.flatten()
-            xmin -= o['x']
-            xmax -= o['x']
-            ymin -= o['y']
-            ymax -= o['y']
-            zmin = (zmin-o['z'])*zg
-            zmax = (zmax-o['z'])*zg
-            self.range = {'xmin':xmin, 'ymin':ymin, 'zmin':zmin,
-                          'xmax':xmax, 'ymax':ymax, 'zmax':zmax}
-            self.resize()
-            refresh = True
-            genGLobj = True
-        if genGLobj:
-            self.color()
-            # the objects will be re-generated before drawing
-            self.glObject = None
-        if refresh:
+        self.zAutoScale = zg
+        zmin = (zmin-o)*zg
+        zmax = (zmax-o)*zg
+        self.range.update({'zmin':zmin, 'zmax':zmax})
+        zm = max(abs(zmax), abs(zmin))
+        self.zgain = -1
+        if zm > 0:
+            self.zgain = -0.1/zm
+
+    def SetHudText(self, txt):
+        if txt != self.hudtext:
+            self.hudtext = txt
             self.Refresh()
+
+    def GetHudText(self):
+        return self.hudtext
+
+    def UpdateHudText(self):
+        y, x = self.selected['x'], self.selected['y']
+        r, c = self.rawPoints['z'].shape
+        if x >= 0 and y >= 0 and x < c and y < r:
+            self.SetHudText('(%d, %d) %.4f'%(x, y, self.rawPoints['z'][y, x]))
+
+    def SetSelected(self, sel):
+        self.selected.update(sel)
+        self.color()
+        self.glObject = None
+        self.UpdateHudText()
+        self.Refresh()
+
+    def GetSelected(self):
+        return self.selected
+
+    def SetColorMap(self, clrmap):
+        self.colorMap = clrmap
+        self.color()
+        self.glObject = None
+        self.Refresh()
+
+    def GetColorMap(self):
+        return self.colorMap
+
+    def SetColorScale(self, scale):
+        self.colorScale = scale
+
+    def GetColorScale(self, scale):
+        return self.colorScale
+
+    def UpdateImage(self, points):
+        # light-weighted function to update the image value as fast as possible,
+        #assume its dimension does not change
+
+        self.rawPoints['z'] = points
+        self.UpdateHudText()
+        rows, cols = points.shape
+        self.Pz[0:rows, 0:cols] = points
+        self.Pz[-1, :] = self.Pz[-2, :]
+        self.Pz[:, -1] = self.Pz[:, -2]
+        zg = self.zAutoScale
+        if self.show['triangle']:
+            self.points[:, 2] = ((self.Pz - self.dataOffset['z'])*zg).T.flatten()
+        else:
+            self.points[:, 2] = -self.dataOffset['z']*zg
+        self.color()
+        self.glObject = None
+        self.Refresh()
+
+    def SetDimension(self, rows, cols):
+        # 'x', 'y' is used in 3D mode, where the image is expanded 1 pixel on
+        # each dimension
+        self.dimension = {'y': rows+1, 'x': cols+1, 'rows': rows, 'cols': cols}
+        # resize the horz/vert bar buffer
+        self.horzbar_buf.resize(cols, self.range, True)
+        self.vertbar_buf.resize(rows, self.range, False)
+        # resize the image buffer
+        self.Pz = np.zeros((rows+1, cols+1))
+        self.points = np.zeros((self.Pz.size, 3))
+
+    def GetDimension(self):
+        return self.dimension
+
+    def SetImage(self, points):
+        # points is a dictionary with keys ['x', 'y', 'z'], and each should
+        # be a 2D matrix with same dimension. 'z' is mandatory.
+        # This function is slow, since it will allocate the memory and
+        # regenerate x/y data if necessary
+        self.rawPoints = points
+        self.points = []
+        rows, cols = points['z'].shape
+        self.SetDimension(rows, cols)
+        xy = np.meshgrid(np.arange(0, cols+1), np.arange(0, rows+1))
+        # if 'x' data is not defined, assume it is [0:cols]
+        if 'x' not in points:
+            Px = xy[0]
+        else:
+            Px = np.zeros((rows+1, cols+1))
+            Px[0:rows, 0:cols] = points['x']
+            Px[-1, :] = Px[-2, :]
+            if cols > 1:
+                Px[:, -1] = Px[:, -2]*2 - Px[:, -3]
+            else:
+                Px[:, -1] = Px[:, -2] + 1
+
+        # if 'x' data is not defined, assume it is [0:cols]
+        if 'y' not in points:
+            Py = xy[1]
+        else:
+            Py = np.zeros((rows+1, cols+1))
+            Py[0:rows, 0:cols] = points['y']
+            Py[:, -1] = Py[:, -2]
+            if rows > 1:
+                Py[-1, :] = Py[-2, :]*2 - Py[-3, :]
+            else:
+                Py[-1, :] = Py[-2, :] + 1
+
+        self.Pz[0:rows, 0:cols] = points['z']
+        self.Pz[-1, :] = self.Pz[-2, :]
+        self.Pz[:, -1] = self.Pz[:, -2]
+        xmin, ymin, zmin = np.min(Px), np.min(Py), np.min(self.Pz)
+        xmax, ymax, zmax = np.max(Px), np.max(Py), np.max(self.Pz)
+        if self.zrange:
+            zmin, zmax = self.zrange
+        self.dataOffset['x'] = (xmax+xmin)/2
+        self.dataOffset['y'] = (ymax+ymin)/2
+        self.dataOffset['z'] = (zmax+zmin)/2
+        o = self.dataOffset
+        zg = 1
+        if zmax-zmin > 0:
+            zg = (ymax-ymin)/(zmax-zmin)
+        self.zAutoScale = zg
+        self.points = np.zeros((self.Pz.size, 3))
+        self.points[:, 0] = (Px - o['x']).T.flatten()
+        self.points[:, 1] = (Py - o['y']).T.flatten()
+        self.points[:, 2] = ((self.Pz - o['z'])*zg).T.flatten()
+        xmin -= o['x']
+        xmax -= o['x']
+        ymin -= o['y']
+        ymax -= o['y']
+        zmin = (zmin-o['z'])*zg
+        zmax = (zmax-o['z'])*zg
+        self.range = {'xmin':xmin, 'ymin':ymin, 'zmin':zmin,
+                      'xmax':xmax, 'ymax':ymax, 'zmax':zmax}
+        self.resize()
+
+        self.UpdateHudText()
+        self.color()
+        # the objects will be re-generated before drawing
+        self.glObject = None
+        self.Refresh()
 
     def calc_contour(self, v, level):
         # calculate the contour of level within a triangle defined by v
@@ -771,15 +1079,69 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                         self.setGLBuffer(ctr['Vertices'][c], ctr['Color'][c])
                         self.drawElementGL(GL_LINES, ctr['Mesh'][c], 0)
 
-    def drawBox(self):
-        # draw the box without zooming
-        vertexScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
-        scaleAll = self.scale['base']
-        glUniform3f(vertexScale, scaleAll, scaleAll, 1)
-        ox = self.offset['base']['x']
-        oy = self.offset['base']['y']
+    def draw2dImg(self):
+        glClearColor(0.0, 0.0, 0.0, 1.0)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+        # Setup shader
+        # it looks like allocating 'vertexResolution' as class member does
+        # not apparently improve the speed
+        vertexResolution = glGetUniformLocation(self.ShaderProgram, "VertexResolution")
+        glUniform3f(vertexResolution, self.W, self.H, self.W)
+
         vertexOffset = glGetUniformLocation(self.ShaderProgram, "VertexOffset")
+        ox = self.offset['base']['x']+self.offset['user']['x']
+        oy = self.offset['base']['y']+self.offset['user']['y']
         glUniform3f(vertexOffset, ox, oy, 0)
+
+        #Set Transformation Matrices
+        TransformMatrix = self.transformMatrix.flatten('F')
+        tmatrix = glGetUniformLocation(self.ShaderProgram, "TransformationMatrix")
+        glUniformMatrix3fv(tmatrix, 1, GL_FALSE, TransformMatrix)
+
+        vertexScaleGL = glGetUniformLocation(self.ShaderProgram, "VertexScaleGL")
+        glUniform3f(vertexScaleGL, 1, -1, self.zgain)
+
+        vertexScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
+        scaleAll = self.scale['base']*self.scale['zoom']
+        glUniform3f(vertexScale, scaleAll, scaleAll, 1)
+
+        W = self.dimension['x']
+        H = self.dimension['y']
+        #if self.img_texture is None:
+        glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
+        glBindTexture(GL_TEXTURE_2D, self.glTextures[2])
+        # the pointsClr is col-wise (i.e., 1st col, 2nd col...)
+        mybuffer = self.pointsClr.astype(np.float32).flatten()
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, H, W, 0, GL_RGBA,
+                     GL_FLOAT, mybuffer)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glGenerateMipmap(GL_TEXTURE_2D)
+
+        glBindTexture(GL_TEXTURE_2D, 0)
+
+        glActiveTexture(GL_TEXTURE0)
+        glBindTexture(GL_TEXTURE_2D, self.glTextures[2])
+
+        xmax, xmin = self.range['xmax'], self.range['xmin']
+        ymax, ymin = self.range['ymax'], self.range['ymin']
+        zmax, zmin = self.range['zmax'], self.range['zmin']
+        vertex = np.array([xmin, ymax, zmin,
+                           xmin, ymin, zmin,
+                           xmax, ymin, zmin,
+                           xmax, ymax, zmin])
+        # texture coordinate
+        color = np.array([1-1./H, 0, 0, 1,
+                          0, 0, 0, 1,
+                          0, 1-1./W, 0, 1,
+                          1-1./H, 1-1./W, 0, 1])
+        triangle = np.array([0, 1, 2, 3])
+        glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
+        self.setGLBuffer(vertex, color)
+        self.drawElementGL(GL_QUADS, triangle, 3, 0)
+
+    def drawBox(self):
         if self.show['box']:
             r = self.range
             vertex = np.array([r['xmin'], r['ymin'], r['zmin'],
@@ -806,9 +1168,38 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         if self.show['axis']:
             self.drawAxisGL()
 
+    def drawBar(self, horz=True):
+        if horz:
+            y = self.selected['y']
+            if y < 0 or y >= self.rawPoints['z'].shape[0]:
+                # out of range
+                return
+            d = self.rawPoints['z'][y, :]
+            self.horzbar_buf.update(d, self.zAutoScale)
+            v, c, l = self.horzbar_buf.glObject()
+        else:
+            x = self.selected['x']
+            if x < 0 or x >= self.rawPoints['z'].shape[1]:
+                # out of range
+                return
+            d = self.rawPoints['z'][:, x]
+            self.vertbar_buf.update(d, self.zAutoScale)
+            v, c, l = self.vertbar_buf.glObject()
+
+        self.setGLBuffer(v, c)
+        self.drawElementGL(GL_LINE_STRIP, l, 0)
+
     def draw(self):
-        self.drawGL()
-        self.drawBox()
+        if self.mode_2d:
+            self.draw2dImg()
+        else:
+            self.drawGL()
+            self.drawBox()
+        glLineWidth(2.0)
+        if self.show['horz_bar']:
+            self.drawBar()
+        if self.show['vert_bar']:
+            self.drawBar(False)
         self.drawHud()
 
     def drawHud(self):
