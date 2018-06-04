@@ -1,3 +1,3 @@
-# glsurface (an wxpython+pyopengl example)
+**glsurface**: show 2d data with wxpython and pyopengl
 
 ![img](images/demo.png)
