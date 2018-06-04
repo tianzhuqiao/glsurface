@@ -41,7 +41,7 @@ class mainFrame(wx.Frame):
 class SurfacePanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent, -1)
-        xy = np.meshgrid(np.linspace(-3, 3, 61), np.linspace(-3, 3, 61))
+        xy = np.meshgrid(np.linspace(-4, 4, 81), np.linspace(-1, 1, 21))
         x = xy[0]
         y = xy[1]
         z = np.sinc(x)*np.sinc(y)

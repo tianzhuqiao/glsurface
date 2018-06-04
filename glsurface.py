@@ -18,7 +18,9 @@ attribute vec4 VertexColor;
 uniform mat3 TransformationMatrix;
 uniform vec3 VertexResolution;
 uniform vec3 VertexScale;
+uniform vec3 VertexScaleData;
 uniform vec3 VertexOffset;
+uniform vec3 VertexOffsetData;
 uniform vec3 VertexScaleGL;
 varying vec2 vTextureCoord;
 varying vec4 vColor;
@@ -27,10 +29,10 @@ void main(void) {
     if(VertexOriginal == 1) {
         gl_Position = vec4(VertexPosition, 1.0);
     } else if (VertexOriginal == 2) {
-        gl_Position = vec4((((VertexPosition))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);
+        gl_Position = vec4((((VertexPosition-VertexOffsetData)*VertexScaleData)*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);
         gl_Position = gl_Position*vec4(VertexScaleGL,1);
     } else {
-        gl_Position = vec4(((TransformationMatrix*(VertexPosition))*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);
+        gl_Position = vec4(((TransformationMatrix*((VertexPosition-VertexOffsetData)*VertexScaleData)*VertexScale)+VertexOffset)/VertexResolution*2.0-1.0, 1.0);
         gl_Position = gl_Position*vec4(VertexScaleGL,1);
     }
     vColor = VertexColor;
@@ -92,10 +94,10 @@ class SimpleBarBuf(object):
         zmax = self.range['zmax']
         if self.horz:
             ymax, ymin = self.range['ymax'], self.range['ymin']
-            self.vertex[:, 1] = ymax-(np.kron(d, [0, 1, 1, 0])).flatten()*g*ymax/zmax
+            self.vertex[:, 1] = ymax-(np.kron(d, [0, 1, 1, 0])).flatten()*g
         else:
             xmax, xmin = self.range['xmax'], self.range['xmin']
-            self.vertex[:, 0] = xmax-(np.kron(d, [0, 1, 1, 0])).flatten()*g*xmax/zmax
+            self.vertex[:, 0] = xmax-(np.kron(d, [0, 1, 1, 0])).flatten()*g
 
 
 class SimpleSurfaceCanvas(glcanvas.GLCanvas):
@@ -141,11 +143,10 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.selected = {'x':0, 'y':0, 'clr':[1, 0, 1, 1]}
         self.colorScale = []
         self.blocks = []
-        self.zAutoScale = 1
-        self.zgain = 1.
+        self.data_zscale = 1
         # 2d mode is the fast-drawing mode, only shows the 2D image
         self.mode_2d = False
-        self.show = {'triangle': True, 'mesh': False, 'contour': False,
+        self.show = {'surface': True, 'mesh': False, 'contour': False,
                      'box':False, 'axis':False, 'horz_bar': False,
                      'vert_bar': False}
         self.contourLevels = 100
@@ -204,7 +205,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         elements = wx.Menu()
         elements.Append(self.ID_SHOW_2D, 'Show 2D Mode\tshift+t', '', wx.ITEM_CHECK)
         elements.AppendSeparator()
-        elements.Append(self.ID_SHOW_TRIANGLE, 'Show Triangle\tshift+t', '', wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_TRIANGLE, 'Show Surface\tshift+t', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_MESH, 'Show Mesh', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_CONTOUR, 'Show Contour', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_BOX, 'Show Box', '', wx.ITEM_CHECK)
@@ -228,6 +229,9 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         if not self.mode_2d:
             self.SetImage(self.rawPoints)
 
+    def Get2dMode(self):
+        return self.mode_2d
+
     def SetShowMode(self, **kwargs):
         refresh = False
         genGLobj = False
@@ -248,9 +252,10 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         eid = event.GetId()
         show = {}
         if eid == self.ID_SHOW_2D:
-            self.Set2dMode(True)
+            self.Set2dMode(not self.mode_2d)
+            self.Refresh()
         elif eid == self.ID_SHOW_TRIANGLE:
-            show['triangle'] = not self.show['triangle']
+            show['surface'] = not self.show['surface']
         elif eid == self.ID_SHOW_MESH:
             show['mesh'] = not self.show['mesh']
         elif eid == self.ID_SHOW_CONTOUR:
@@ -284,7 +289,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         if eid == self.ID_SHOW_2D:
             event.Check(self.mode_2d)
         elif eid == self.ID_SHOW_TRIANGLE:
-            event.Check(self.show['triangle'])
+            event.Check(self.show['surface'])
         elif eid == self.ID_SHOW_MESH:
             event.Check(self.show['mesh'])
             event.Enable(not self.mode_2d)
@@ -310,6 +315,14 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         elif eid == self.ID_ROTATE_270:
             event.Check(self.default_rotate == 270)
 
+    def SetMargin(self, left=None, right=None, top=None, bottom=None):
+        for m in zip([left, right, top, bottom], ['left', 'right', 'top', 'bottom']):
+            if m[0] is not None:
+                self.margin[m[1]] = m[0]
+
+    def GetMargin(self):
+        return self.margin
+
     def resize(self):
         sz = self.GetClientSize()
         self.W = sz.x
@@ -320,10 +333,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         if self.default_rotate in [90, 270]:
             xmax, xmin, ymax, ymin = ymax, ymin, xmax, xmin
         if xmax-xmin > 0 and ymax-ymin >= 0:
-            t = self.margin['top']
-            b = self.margin['bottom']
-            l = self.margin['left']
-            r = self.margin['right']
+            t, b = self.margin['top'], self.margin['bottom']
+            l, r = self.margin['left'], self.margin['right']
             self.scale['base'] = min((self.W-l-r)/(xmax-xmin), (self.H-t-b)/(ymax-ymin))
             self.offset['base'] = {'x': self.W/2 + (l-r)/2, 'y': self.H/2 + (t-b)/2}
 
@@ -509,17 +520,17 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.scale['zoom'] = 1
         self.offset['user'] = {'x':0, 'y':0}
         # set the default orientation
-        self.rotate(0, 0, self.default_rotate/180*np.pi/self.rotateTheta)
+        self.rotate(0, 0, self.default_rotate/180.*np.pi/self.rotateTheta)
 
     def getColorByZ(self, z):
         zMin = self.range['zmin']
         zMax = self.range['zmax']
-        scale = self.zAutoScale
+        scale = self.data_zscale
         if zMax-zMin > 0:
             scale = 1/(zMax-zMin)
         offset = 0
         if len(self.colorScale) == 2:
-            scale = self.colorScale[0]/self.zAutoScale
+            scale = self.colorScale[0]/scale
             offset = self.colorScale[1]
 
         C = self.colorMap
@@ -546,6 +557,13 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.glObject = None
         self.Refresh()
 
+    def SetDataScaleZ(self, scale):
+        # add additional scale to z value, so that it may look better when
+        # rotate the image (to project z value on x/y axis); otherwise, the
+        # project may be too small or large. For example, x/y: [0: 100],
+        # z [0: 0.01]
+        self.data_zscale = scale
+
     def SetRangeZ(self, zrange):
         # Set the range of the image values; otherwise it is calculated from
         # the data itself. It will impact the color of each pixel. Instead of
@@ -561,20 +579,19 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         else:
             zmin, zmax = 0, 1
         self.dataOffset['z'] = o = (zmax+zmin)/2
+        xmax, xmin = self.range['xmax'], self.range['xmin']
         ymax, ymin = self.range['ymax'], self.range['ymin']
-        zg = 1
-        if zmax-zmin > 0:
-            zg = float(ymax-ymin)/(zmax-zmin)
-        if zg == 0:
-            zg = 1
-        self.zAutoScale = zg
-        zmin = (zmin-o)*zg
-        zmax = (zmax-o)*zg
+        rng = max(ymax - ymin, xmax- xmin)
+        # scale the z data, such that it has similar span as x or y axis.
+        # otherwise, when rotate the image, the projection of z on x or y axis
+        # will not look good (e.g., too small or too large).
+        zscale = 1
+        if zmax-zmin > 0 and rng > 0:
+            zscale = float(rng)/(zmax-zmin)
+        self.SetDataScaleZ(zscale)
+
         self.range.update({'zmin':zmin, 'zmax':zmax})
         zm = max(abs(zmax), abs(zmin))
-        self.zgain = -1
-        if zm > 0:
-            self.zgain = -0.1/zm
 
     def SetHudText(self, txt):
         if txt != self.hudtext:
@@ -585,7 +602,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         return self.hudtext
 
     def UpdateHudText(self):
-        y, x = self.selected['x'], self.selected['y']
+        x, y = self.selected['x'], self.selected['y']
         r, c = self.rawPoints['z'].shape
         if x >= 0 and y >= 0 and x < c and y < r:
             self.SetHudText('(%d, %d) %.4f'%(x, y, self.rawPoints['z'][y, x]))
@@ -625,11 +642,10 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.Pz[0:rows, 0:cols] = points
         self.Pz[-1, :] = self.Pz[-2, :]
         self.Pz[:, -1] = self.Pz[:, -2]
-        zg = self.zAutoScale
-        if self.show['triangle']:
-            self.points[:, 2] = ((self.Pz - self.dataOffset['z'])*zg).T.flatten()
+        if self.show['surface']:
+            self.points[:, 2] = self.Pz.T.flatten()
         else:
-            self.points[:, 2] = -self.dataOffset['z']*zg
+            self.points[:, 2].fill(0)
         self.color()
         self.glObject = None
         self.Refresh()
@@ -654,9 +670,12 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         # This function is slow, since it will allocate the memory and
         # regenerate x/y data if necessary
         self.rawPoints = points
-        self.points = []
         rows, cols = points['z'].shape
         self.SetDimension(rows, cols)
+        # expand the image by 1 pixel on each dimension, since for pixel (i, j)
+        # the surface is draw as a quad defined by
+        # (x(i) y(i), z(i)), (x(i+1) y(i), z(i))
+        # (x(i) y(i+1), z(i)), (x(i+1) y(i+1), z(i))
         xy = np.meshgrid(np.arange(0, cols+1), np.arange(0, rows+1))
         # if 'x' data is not defined, assume it is [0:cols]
         if 'x' not in points:
@@ -692,21 +711,11 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.dataOffset['x'] = (xmax+xmin)/2
         self.dataOffset['y'] = (ymax+ymin)/2
         self.dataOffset['z'] = (zmax+zmin)/2
-        o = self.dataOffset
-        zg = 1
-        if zmax-zmin > 0:
-            zg = (ymax-ymin)/(zmax-zmin)
-        self.zAutoScale = zg
+
         self.points = np.zeros((self.Pz.size, 3))
-        self.points[:, 0] = (Px - o['x']).T.flatten()
-        self.points[:, 1] = (Py - o['y']).T.flatten()
-        self.points[:, 2] = ((self.Pz - o['z'])*zg).T.flatten()
-        xmin -= o['x']
-        xmax -= o['x']
-        ymin -= o['y']
-        ymax -= o['y']
-        zmin = (zmin-o['z'])*zg
-        zmax = (zmax-o['z'])*zg
+        self.points[:, 0] = Px.T.flatten()
+        self.points[:, 1] = Py.T.flatten()
+        self.points[:, 2] = self.Pz.T.flatten()
         self.range = {'xmin':xmin, 'ymin':ymin, 'zmin':zmin,
                       'xmax':xmax, 'ymax':ymax, 'zmax':zmax}
         self.SetRangeZ([])
@@ -1041,34 +1050,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.drawElementGL(GL_LINES, mesh, 0)
 
     def drawGL(self):
-        glClearColor(0.0, 0.0, 0.0, 1.0)
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-        #Setup shader
-        vertexResolution = glGetUniformLocation(self.ShaderProgram, "VertexResolution")
-        glUniform3f(vertexResolution, self.W, self.H, self.W)
-
-        vertexOffset = glGetUniformLocation(self.ShaderProgram, "VertexOffset")
-        ox = self.offset['base']['x']+self.offset['user']['x']
-        oy = self.offset['base']['y']+self.offset['user']['y']
-        glUniform3f(vertexOffset, ox, oy, 0)
-
-        #Set Transformation Matrices
-        TransformMatrix = self.transformMatrix.flatten('F')
-        tmatrix = glGetUniformLocation(self.ShaderProgram, "TransformationMatrix")
-        glUniformMatrix3fv(tmatrix, 1, GL_FALSE, TransformMatrix)
-
-        vertexScaleGL = glGetUniformLocation(self.ShaderProgram, "VertexScaleGL")
-        zgain = max(abs(self.range['zmax']), abs(self.range['zmin']))
-        if zgain == 0:
-            zgain = 1
-        glUniform3f(vertexScaleGL, 1, -1, -0.1/zgain)
-
-        vertexScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
-        scaleAll = self.scale['base']*self.scale['zoom']
-        glUniform3f(vertexScale, scaleAll, scaleAll, 1)
-
-        if self.show['triangle'] or self.show['mesh'] or self.show['contour']:
+        if self.show['surface'] or self.show['mesh'] or self.show['contour']:
             if not self.glObject:
                 self.glObject = self.prepareGL()
             obj = self.glObject
@@ -1076,7 +1059,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             for b in range(block):
                 self.setGLBuffer(obj['Vertices'][b], obj['Color'][b])
                 clr_mesh = 0
-                if self.show['triangle']:
+                if self.show['surface']:
+                    # if surface is on, show the mesh in blue
                     clr_mesh = 1
                     self.drawElementGL(GL_QUADS, obj['Trinagles'][b], 0)
                 if self.show['mesh']:
@@ -1089,31 +1073,11 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                         self.drawElementGL(GL_LINES, ctr['Mesh'][c], 0)
 
     def draw2dImg(self):
-        glClearColor(0.0, 0.0, 0.0, 1.0)
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-
-        # Setup shader
-        # it looks like allocating 'vertexResolution' as class member does
-        # not apparently improve the speed
-        vertexResolution = glGetUniformLocation(self.ShaderProgram, "VertexResolution")
-        glUniform3f(vertexResolution, self.W, self.H, self.W)
-
-        vertexOffset = glGetUniformLocation(self.ShaderProgram, "VertexOffset")
-        ox = self.offset['base']['x']+self.offset['user']['x']
-        oy = self.offset['base']['y']+self.offset['user']['y']
-        glUniform3f(vertexOffset, ox, oy, 0)
-
         #Set Transformation Matrices
         TransformMatrix = self.transformMatrix.flatten('F')
         tmatrix = glGetUniformLocation(self.ShaderProgram, "TransformationMatrix")
         glUniformMatrix3fv(tmatrix, 1, GL_FALSE, TransformMatrix)
 
-        vertexScaleGL = glGetUniformLocation(self.ShaderProgram, "VertexScaleGL")
-        glUniform3f(vertexScaleGL, 1, -1, self.zgain)
-
-        vertexScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
-        scaleAll = self.scale['base']*self.scale['zoom']
-        glUniform3f(vertexScale, scaleAll, scaleAll, 1)
 
         W = self.dimension['x']
         H = self.dimension['y']
@@ -1148,7 +1112,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         triangle = np.array([0, 1, 2, 3])
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
         self.setGLBuffer(vertex, color)
-        self.drawElementGL(GL_QUADS, triangle, 3, 0)
+        self.drawElementGL(GL_QUADS, triangle, 3)
 
     def drawBox(self):
         if self.show['box']:
@@ -1184,7 +1148,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                 # out of range
                 return
             d = self.rawPoints['z'][y, :]
-            self.horzbar_buf.update(d, self.zAutoScale)
+            self.horzbar_buf.update(d, self.data_zscale)
             v, c, l = self.horzbar_buf.glObject()
         else:
             x = self.selected['x']
@@ -1192,13 +1156,42 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                 # out of range
                 return
             d = self.rawPoints['z'][:, x]
-            self.vertbar_buf.update(d, self.zAutoScale)
+            self.vertbar_buf.update(d, self.data_zscale)
             v, c, l = self.vertbar_buf.glObject()
 
         self.setGLBuffer(v, c)
         self.drawElementGL(GL_LINE_STRIP, l, 0)
 
     def draw(self):
+        glClearColor(0.0, 0.0, 0.0, 1.0)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+        #Setup shader
+        vertexResolution = glGetUniformLocation(self.ShaderProgram, "VertexResolution")
+        glUniform3f(vertexResolution, self.W, self.H, self.W)
+
+        vertexOffset = glGetUniformLocation(self.ShaderProgram, "VertexOffset")
+        ox = self.offset['base']['x']+self.offset['user']['x']
+        oy = self.offset['base']['y']+self.offset['user']['y']
+        glUniform3f(vertexOffset, ox, oy, self.offset['base']['x'])
+
+        vertexOffsetData = glGetUniformLocation(self.ShaderProgram, "VertexOffsetData")
+        glUniform3f(vertexOffsetData, self.dataOffset['x'], self.dataOffset['y'], self.dataOffset['z'])
+
+        #Set Transformation Matrices
+        TransformMatrix = self.transformMatrix.flatten('F')
+        tmatrix = glGetUniformLocation(self.ShaderProgram, "TransformationMatrix")
+        glUniformMatrix3fv(tmatrix, 1, GL_FALSE, TransformMatrix)
+
+        vertexScaleGL = glGetUniformLocation(self.ShaderProgram, "VertexScaleGL")
+        glUniform3f(vertexScaleGL, 1, -1, -1)
+        vertexScaleData = glGetUniformLocation(self.ShaderProgram, "VertexScaleData")
+        glUniform3f(vertexScaleData, 1, 1, self.data_zscale)
+
+        vertexScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
+        scaleAll = self.scale['base']*self.scale['zoom']
+        glUniform3f(vertexScale, scaleAll, scaleAll, 1)
+
         if self.mode_2d:
             self.draw2dImg()
         else:
@@ -1302,4 +1295,3 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         Rz[1][1] = math.cos(sign*self.rotateTheta)
         Rz[2][2] = 1
         return Rz
-
