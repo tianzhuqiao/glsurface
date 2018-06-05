@@ -59,16 +59,28 @@ void main(void) {
 """
 
 class SimpleBarBuf(object):
-    def __init__(self, sz, rng, horz):
-        self.resize(sz, rng, horz)
-
-    def resize(self, sz, rng, horz, clr=[0, 0.6, 0, 1]):
-        self.range = rng
-        self.dSize = sz
+    def __init__(self, sz, rng, horz, clr=[0, 0.6, 0, 1]):
         self.horz = horz
+        self.range = rng
+        self.bar_color = clr
+        self.buf_size = sz
+        self.Resize(self.buf_size)
+
+    def SetRange(self, rng):
+        self.range = rng
+        self.Resize(self.buf_size)
+
+    def SetColor(self, clr):
+        self.bar_color = clr
+        if self.buf_size > 0:
+            self.color = np.repeat(np.array([clr]), self.buf_size*4, axis=0)
+
+    def Resize(self, sz):
+        self.buf_size = sz
+        zmax = self.range['zmax']
         self.vertex = np.zeros((sz*4, 3))
-        self.vertex[:, 2].fill(rng['zmax'])
-        if horz:
+        self.vertex[:, 2].fill(zmax)
+        if self.horz:
             # for point d[i], draw lines between points:
             # (i, ymax), (i, ymax-d[i]*g), (i+1, ymax-d[i]*g), (i+1, ymax)
             # see update() for detail
@@ -82,23 +94,22 @@ class SimpleBarBuf(object):
             delta = (ymax-ymin)/sz
             self.vertex[:, 1] = (np.repeat(y, 4, axis=1) + [0, 0, delta, delta]).flatten()
 
-        self.color = np.repeat(np.array([clr]), sz*4, axis=0)
+        self.SetColor(self.bar_color)
         self.line = np.arange(sz*4)
 
-    def glObject(self):
+    def GetGLObject(self):
         return self.vertex.flatten(), self.color, self.line
 
-    def update(self, d, g):
-        if len(d) != self.dSize:
+    def SetData(self, d):
+        if len(d) != self.buf_size:
             raise ValueError()
         zmax = self.range['zmax']
         if self.horz:
             ymax, ymin = self.range['ymax'], self.range['ymin']
-            self.vertex[:, 1] = ymax-(np.kron(d, [0, 1, 1, 0])).flatten()*g
+            self.vertex[:, 1] = ymax-(np.kron(d, [0, 1, 1, 0])).flatten()
         else:
             xmax, xmin = self.range['xmax'], self.range['xmin']
-            self.vertex[:, 0] = xmax-(np.kron(d, [0, 1, 1, 0])).flatten()*g
-
+            self.vertex[:, 0] = xmax-(np.kron(d, [0, 1, 1, 0])).flatten()
 
 class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     ID_SHOW_2D = wx.NewId()
@@ -121,13 +132,13 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glcanvas.GLCanvas.__init__(self, parent, -1, attribList=attribs)
         self.context = glcanvas.GLContext(self)
 
-        self.dragStart = {'x':0, 'y':0}
-        self.dragEnd = {'x':0, 'y':0}
+        self.drag_start = wx.Point(0, 0)
+        self.drag_end = wx.Point(0, 0)
         self.points = []
         self.pointsClr = []
         self.dimension = {'x':0, 'y':0}
-        self.mouseIsDown = False
-        self.isDragging = False
+        self.is_mouse_down = False
+        self.is_dragging = False
         self.rotation = {'x':110, 'y':0, 'z':110}
         self.default_rotate = 0
         sz = self.GetClientSize()
@@ -136,12 +147,12 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.range = {'xmin':0, 'ymin':0, 'zmin':0, 'xmax':0, 'ymax':0, 'zmax':0}
         self.zrange = []
         self.scale = {'base':1, 'zoom':1}
-        self.rotateTheta = 0.05
+        self.rotate_delta = 0.05
         self.margin = {'top':50, 'bottom':10, 'left':1, 'right':1}
         self.offset = {'base':{'x':0, 'y':0}, 'user':{'x':0, 'y':0}}
-        self.dataOffset = {'x':0, 'y':0, 'z':0}
+        self.data_offset = {'x':0, 'y':0, 'z':0}
         self.selected = {'x':0, 'y':0, 'clr':[1, 0, 1, 1]}
-        self.colorScale = []
+        self.color_scale = []
         self.blocks = []
         self.data_zscale = 1
         # 2d mode is the fast-drawing mode, only shows the 2D image
@@ -149,25 +160,24 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.show = {'surface': True, 'mesh': False, 'contour': False,
                      'box':False, 'axis':False, 'horz_bar': False,
                      'vert_bar': False}
-        self.contourLevels = 100
-        self.transformMatrix = np.eye(3, dtype=np.float32)
-        self.colorMap = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1],
-                                  [0, 1, 0, 1], [1, 1, 0, 1], [1, 0.5, 0, 1],
-                                  [1, 0, 0, 1]], np.float32)
-        self.colorRange = []
+        self.contour_levels = 100
+        self.rotate_matrix = np.eye(3, dtype=np.float32)
+        self.color_map = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1],
+                                   [0, 1, 0, 1], [1, 1, 0, 1], [1, 0.5, 0, 1],
+                                   [1, 0, 0, 1]], np.float32)
         self.initialized = False
-        self.rawPoints = points
-        self.glObject = {}
+        self.raw_points = points
+        self.globjects = {}
         self.hudtext = ''
         self._hudtext = ''
         self._hudBuffer = np.zeros((0, 0, 4))
         # buffers to draw bar
-        rows, cols = self.rawPoints['z'].shape
+        rows, cols = self.raw_points['z'].shape
         self.horzbar_buf = SimpleBarBuf(cols, self.range, True)
         self.vertbar_buf = SimpleBarBuf(rows, self.range, False)
-        self.SetImage(self.rawPoints)
+        self.SetImage(self.raw_points)
 
-        self.reset()
+        self.ResetRotate()
 
         accel_tbl = self.GetAccelList()
         self.SetAcceleratorTable(wx.AcceleratorTable(accel_tbl))
@@ -186,7 +196,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenu)
 
     def GetAccelList(self):
-        accel_tbl = [(wx.ACCEL_SHIFT, ord('T'), self.ID_SHOW_TRIANGLE),
+        accel_tbl = [(wx.ACCEL_SHIFT, ord('S'), self.ID_SHOW_TRIANGLE),
                      (wx.ACCEL_SHIFT, ord('H'), self.ID_SHOW_HORZ_BAR),
                      (wx.ACCEL_SHIFT, ord('V'), self.ID_SHOW_VERT_BAR),
                     ]
@@ -203,9 +213,9 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def GetContextMenu(self):
         menu = wx.Menu()
         elements = wx.Menu()
-        elements.Append(self.ID_SHOW_2D, 'Show 2D Mode\tshift+t', '', wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_2D, 'Show 2D Mode', '', wx.ITEM_CHECK)
         elements.AppendSeparator()
-        elements.Append(self.ID_SHOW_TRIANGLE, 'Show Surface\tshift+t', '', wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_TRIANGLE, 'Show Surface\tshift+s', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_MESH, 'Show Mesh', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_CONTOUR, 'Show Contour', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_BOX, 'Show Box', '', wx.ITEM_CHECK)
@@ -227,7 +237,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def Set2dMode(self, is2d):
         self.mode_2d = is2d
         if not self.mode_2d:
-            self.SetImage(self.rawPoints)
+            self.SetImage(self.raw_points)
 
     def Get2dMode(self):
         return self.mode_2d
@@ -242,9 +252,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                 if key in ['mesh', 'contour']:
                     genGLobj = True
         if genGLobj:
-            self.color()
-            # the objects will be re-generated before drawing
-            self.glObject = None
+            self.Invalidate()
         if refresh:
             self.Refresh()
 
@@ -277,8 +285,8 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                 self.default_rotate = 180
             elif eid == self.ID_ROTATE_270:
                 self.default_rotate = 270
-            self.reset()
-            self.resize()
+            self.ResetRotate()
+            self.Resize()
             self.Refresh()
             return
         if show:
@@ -323,7 +331,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def GetMargin(self):
         return self.margin
 
-    def resize(self):
+    def Resize(self):
         sz = self.GetClientSize()
         self.W = sz.x
         self.H = sz.y
@@ -340,7 +348,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
 
     def OnSize(self, event):
         # update the size
-        self.resize()
+        self.Resize()
         self.Refresh()
         event.Skip()
 
@@ -349,10 +357,10 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.SetCurrent(self.context)
         if not self.initialized:
             self.InitGL()
-            if self.rawPoints is not None:
-                self.SetImage(self.rawPoints)
+            if self.raw_points is not None:
+                self.SetImage(self.raw_points)
             self.initialized = True
-        self.draw()
+        self.Draw()
         self.SwapBuffers()
 
     def InitGL(self):
@@ -394,12 +402,6 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         # generate the buffer
         self.glBufs = glGenBuffers(3)
         self.glTextures = glGenTextures(3) # axis, hud, 2d image
-        self.vtxResolution = glGetUniformLocation(self.ShaderProgram, "VertexResolution")
-        self.vtxOffset = glGetUniformLocation(self.ShaderProgram, "VertexOffset")
-        self.vtxMatrix = glGetUniformLocation(self.ShaderProgram, "TransformationMatrix")
-        self.vtxScaleGL = glGetUniformLocation(self.ShaderProgram, "VertexScaleGL")
-        self.vtxScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
-        self.fraguSampler = glGetUniformLocation(self.ShaderProgram, "uSampler")
 
     def OnKeyDown(self, event):
         if event.ShiftDown():
@@ -424,7 +426,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                     y = 1
             else:
                 event.Skip()
-            self.rotate(x, y, z)
+            self.Rotate(x, y, z)
         else:
             if self.dimension['x'] <= 0 or self.dimension['y'] <= 0:
                 return
@@ -462,40 +464,41 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
     def OnMouseDown(self, event):
         bRect = self.GetClientRect()
         pos = event.GetPosition()
-        self.dragStart['x'] = (pos.x - bRect.left)*(self.W/bRect.width)
-        self.dragStart['y'] = (pos.y - bRect.top)*(self.H/bRect.height)
-        self.mouseIsDown = True
+        self.drag_start.x = (pos.x - bRect.left)#*(self.W/bRect.width)
+        self.drag_start.y = (pos.y - bRect.top)#*(self.H/bRect.height)
+        self.is_mouse_down = True
 
     def OnMouseMotion(self, event):
         bRect = self.GetClientRect()
         pos = event.GetPosition()
-        self.dragEnd['x'] = (pos.x - bRect.left)*((self.W)/bRect.width)
-        self.dragEnd['y'] = (pos.y - bRect.top)*((self.H)/bRect.height)
-        if self.mouseIsDown:
+        self.drag_end.x = (pos.x - bRect.left)#*((self.W)/bRect.width)
+        self.drag_end.y = (pos.y - bRect.top)#*((self.H)/bRect.height)
+        if self.is_mouse_down:
             if event.CmdDown():
-                self.offset['user']['x'] += self.dragEnd['x'] - self.dragStart['x']
-                self.offset['user']['y'] += self.dragEnd['y'] - self.dragStart['y']
-                self.dragStart['x'] = self.dragEnd['x']
-                self.dragStart['y'] = self.dragEnd['y']
+                # when ctrl is down, move the image with mouse
+                self.offset['user']['x'] += self.drag_end.x - self.drag_start.x
+                self.offset['user']['y'] += self.drag_end.y - self.drag_start.y
+                self.drag_start.x = self.drag_end.x
+                self.drag_start.y = self.drag_end.y
                 self.Refresh()
             elif not self.mode_2d:
-                # only all rotate in 3d mode
-                if abs(self.dragStart['x']-self.dragEnd['x']) > 1 or \
-                   abs(self.dragStart['y']-self.dragEnd['y']) > 1:
-                    self.isDragging = True
-                if self.isDragging:
-                    self.rotate(-(self.dragEnd['y']-self.dragStart['y']),
-                                (self.dragEnd['x']-self.dragStart['x']), 0)
-                    self.dragStart['x'] = self.dragEnd['x']
-                    self.dragStart['y'] = self.dragEnd['y']
+                # rotate in 3d mode
+                if abs(self.drag_start.x-self.drag_end.x) > 1 or \
+                   abs(self.drag_start.y-self.drag_end.y) > 1:
+                    self.is_dragging = True
+                if self.is_dragging:
+                    self.Rotate(-(self.drag_end.y-self.drag_start.y),
+                                (self.drag_end.x-self.drag_start.x), 0)
+                self.drag_start.x = self.drag_end.x
+                self.drag_start.y = self.drag_end.y
 
     def OnMouseUp(self, event):
-        self.mouseIsDown = False
-        self.isDragging = False
+        self.is_mouse_down = False
+        self.is_dragging = False
         self.Refresh()
 
     def OnDoubleClick(self, event):
-        self.reset()
+        self.ResetRotate()
         self.Refresh()
 
     def OnMouseWheel(self, event):
@@ -513,49 +516,52 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             user['y'] = y - (y-base['y']-user['y'])*zoom - base['y']
             self.Refresh()
 
-    def reset(self):
+    def ResetRotate(self):
         # reset rotation, zoom, offset
         self.rotation = {'x':0, 'y':0, 'z':0}
-        self.transformMatrix = np.eye(3, dtype=np.float32)
+        self.rotate_matrix = np.eye(3, dtype=np.float32)
         self.scale['zoom'] = 1
         self.offset['user'] = {'x':0, 'y':0}
         # set the default orientation
-        self.rotate(0, 0, self.default_rotate/180.*np.pi/self.rotateTheta)
+        self.Rotate(0, 0, self.default_rotate/180.*np.pi/self.rotate_delta)
 
-    def getColorByZ(self, z):
+    def GetColorByZ(self, z):
         zMin = self.range['zmin']
         zMax = self.range['zmax']
         scale = self.data_zscale
         if zMax-zMin > 0:
             scale = 1/(zMax-zMin)
         offset = 0
-        if len(self.colorScale) == 2:
-            scale = self.colorScale[0]/scale
-            offset = self.colorScale[1]
+        if len(self.color_scale) == 2:
+            scale = self.color_scale[0]
+            offset = self.color_scale[1]
 
-        C = self.colorMap
+        C = self.color_map
         norm_p = (z - zMin)*scale + offset
-        norm_p = norm_p*len(self.colorMap)
-        norm_p = np.clip(norm_p, 0, len(self.colorMap)-1)
+        norm_p = norm_p*len(self.color_map)
+        norm_p = np.clip(norm_p, 0, len(self.color_map)-1)
         norm_p_l = np.floor(norm_p).astype(int)
         norm_p_r = np.ceil(norm_p).astype(int)
         norm_p_d = norm_p - norm_p_l
         return C[norm_p_l, :] + (((C[norm_p_r, :] - C[norm_p_l, :]).T)*norm_p_d).T
 
-    def color(self):
-        self.pointsClr = self.getColorByZ(self.points[:, 2])
+    def Colorize(self):
+        self.pointsClr = self.GetColorByZ(self.points[:, 2])
         sel = self.selected['x'] * self.dimension['y'] + self.selected['y']
         if sel >= 0 and sel < self.points.shape[0]:
             self.pointsClr[sel, :] = self.selected['clr']
 
-    def setContourLevels(self, level):
-        if level == self.contourLevels:
+    def SetContourLevels(self, level):
+        if level == self.contour_levels:
             return
-        self.contourLevels = level
+        self.contour_levels = level
 
         # the objects will be re-generated before drawing
-        self.glObject = None
+        self.globject = None
         self.Refresh()
+
+    def GetContourLevels(self):
+        return self.contour_levels
 
     def SetDataScaleZ(self, scale):
         # add additional scale to z value, so that it may look better when
@@ -563,6 +569,16 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         # project may be too small or large. For example, x/y: [0: 100],
         # z [0: 0.01]
         self.data_zscale = scale
+
+    def SetRange(self, rng):
+        self.range.update(rng)
+        self.SetRangeZ(self.zrange)
+        self.horzbar_buf.SetRange(self.range)
+        self.vertbar_buf.SetRange(self.range)
+        self.Resize()
+
+    def GetRange(self):
+        return self.range
 
     def SetRangeZ(self, zrange):
         # Set the range of the image values; otherwise it is calculated from
@@ -573,12 +589,12 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         if len(zrange) == 2:
             self.zrange = zrange
             zmin, zmax = self.zrange
-        elif self.rawPoints:
-            z = self.rawPoints['z']
+        elif self.raw_points:
+            z = self.raw_points['z']
             zmin, zmax = np.min(z), np.max(z)
         else:
             zmin, zmax = 0, 1
-        self.dataOffset['z'] = o = (zmax+zmin)/2
+        self.data_offset['z'] = (zmax+zmin)/2
         xmax, xmin = self.range['xmax'], self.range['xmin']
         ymax, ymin = self.range['ymax'], self.range['ymin']
         rng = max(ymax - ymin, xmax- xmin)
@@ -591,7 +607,6 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         self.SetDataScaleZ(zscale)
 
         self.range.update({'zmin':zmin, 'zmax':zmax})
-        zm = max(abs(zmax), abs(zmin))
 
     def SetHudText(self, txt):
         if txt != self.hudtext:
@@ -603,40 +618,44 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
 
     def UpdateHudText(self):
         x, y = self.selected['x'], self.selected['y']
-        r, c = self.rawPoints['z'].shape
+        r, c = self.raw_points['z'].shape
         if x >= 0 and y >= 0 and x < c and y < r:
-            self.SetHudText('(%d, %d) %.4f'%(x, y, self.rawPoints['z'][y, x]))
+            self.SetHudText('(%d, %d) %.4f'%(x, y, self.raw_points['z'][y, x]))
+
+    def Invalidate(self, globject=True, color=True):
+        if color:
+            self.Colorize()
+        if globject:
+            # the objects will be re-generated before drawing
+            self.globjects = None
+        self.Refresh()
 
     def SetSelected(self, sel):
         self.selected.update(sel)
-        self.color()
-        self.glObject = None
         self.UpdateHudText()
-        self.Refresh()
+        self.Invalidate()
 
     def GetSelected(self):
         return self.selected
 
     def SetColorMap(self, clrmap):
-        self.colorMap = clrmap
-        self.color()
-        self.glObject = None
-        self.Refresh()
+        self.color_map = clrmap
+        self.Invalidate()
 
     def GetColorMap(self):
-        return self.colorMap
+        return self.color_map
 
     def SetColorScale(self, scale):
-        self.colorScale = scale
+        self.color_scale = scale
 
-    def GetColorScale(self, scale):
-        return self.colorScale
+    def GetColorScale(self):
+        return self.color_scale
 
     def UpdateImage(self, points):
         # light-weighted function to update the image value as fast as possible,
         #assume its dimension does not change
 
-        self.rawPoints['z'] = points
+        self.raw_points['z'] = points
         self.UpdateHudText()
         rows, cols = points.shape
         self.Pz[0:rows, 0:cols] = points
@@ -646,17 +665,15 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             self.points[:, 2] = self.Pz.T.flatten()
         else:
             self.points[:, 2].fill(0)
-        self.color()
-        self.glObject = None
-        self.Refresh()
+        self.Invalidate()
 
     def SetDimension(self, rows, cols):
         # 'x', 'y' is used in 3D mode, where the image is expanded 1 pixel on
         # each dimension
         self.dimension = {'y': rows+1, 'x': cols+1, 'rows': rows, 'cols': cols}
         # resize the horz/vert bar buffer
-        self.horzbar_buf.resize(cols, self.range, True)
-        self.vertbar_buf.resize(rows, self.range, False)
+        self.horzbar_buf.Resize(cols)
+        self.vertbar_buf.Resize(rows)
         # resize the image buffer
         self.Pz = np.zeros((rows+1, cols+1))
         self.points = np.zeros((self.Pz.size, 3))
@@ -669,7 +686,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         # be a 2D matrix with same dimension. 'z' is mandatory.
         # This function is slow, since it will allocate the memory and
         # regenerate x/y data if necessary
-        self.rawPoints = points
+        self.raw_points = points
         rows, cols = points['z'].shape
         self.SetDimension(rows, cols)
         # expand the image by 1 pixel on each dimension, since for pixel (i, j)
@@ -708,26 +725,21 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         xmax, ymax, zmax = np.max(Px), np.max(Py), np.max(self.Pz)
         if self.zrange:
             zmin, zmax = self.zrange
-        self.dataOffset['x'] = (xmax+xmin)/2
-        self.dataOffset['y'] = (ymax+ymin)/2
-        self.dataOffset['z'] = (zmax+zmin)/2
+        self.data_offset['x'] = (xmax+xmin)/2
+        self.data_offset['y'] = (ymax+ymin)/2
+        self.data_offset['z'] = (zmax+zmin)/2
 
         self.points = np.zeros((self.Pz.size, 3))
         self.points[:, 0] = Px.T.flatten()
         self.points[:, 1] = Py.T.flatten()
         self.points[:, 2] = self.Pz.T.flatten()
-        self.range = {'xmin':xmin, 'ymin':ymin, 'zmin':zmin,
-                      'xmax':xmax, 'ymax':ymax, 'zmax':zmax}
-        self.SetRangeZ([])
-        self.resize()
+        self.SetRange({'xmin':xmin, 'ymin':ymin, 'zmin':zmin,
+                       'xmax':xmax, 'ymax':ymax, 'zmax':zmax})
 
         self.UpdateHudText()
-        self.color()
-        # the objects will be re-generated before drawing
-        self.glObject = None
-        self.Refresh()
+        self.Invalidate()
 
-    def calc_contour(self, v, level):
+    def CalcContour(self, v, level):
         # calculate the contour of level within a triangle defined by v
         # sort by Z
         v = v[v[:, 2].argsort()]
@@ -757,7 +769,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
 
         return {'valid':valid, 'p1':p1, 'p2':p2}
 
-    def prepareContour(self, L, R):
+    def PrepareContour(self, L, R):
         xmin, xmax = self.range['xmin'], self.range['xmax']
         ymin, ymax = self.range['ymin'], self.range['ymax']
         zmin, zmax = self.range['zmin'], self.range['zmax']
@@ -766,7 +778,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         oy = (ymax-ymin)/(self.dimension['y']-1)/2
         oz = 0
         # calculate the contour levels uniformly, ignore endpoints (zmin, zmax)
-        levels = np.linspace(zmin, zmax, self.contourLevels+1, endpoint=False)[1:]
+        levels = np.linspace(zmin, zmax, self.contour_levels+1, endpoint=False)[1:]
         my = self.dimension['y']
         P = self.points
         vertexAll = []
@@ -786,7 +798,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             minmax.append([t1, t2])
 
         for level in levels:
-            clr = self.getColorByZ(level)
+            clr = self.GetColorByZ(level)
             clr = [clr[0], clr[1], clr[2], 1]
             for i in range(L, R):
                 if i%my == my-1 or i+my+1 >= len(P):
@@ -811,7 +823,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                     mesh = []
                     colour = []
                 v = np.array([P[i], P[i+1], P[i+my+1]])
-                p = self.calc_contour(v, level)
+                p = self.CalcContour(v, level)
                 if p['valid']:
                     vertex.append(p['p1'])
                     mesh.append(len(vertex)-1)
@@ -821,7 +833,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                     colour.append(clr)
 
                 v = np.array([P[i], P[i+my], P[i+my+1]])
-                p = self.calc_contour(v, level)
+                p = self.CalcContour(v, level)
                 if p['valid']:
                     vertex.append(p['p1'])
                     mesh.append(len(vertex)-1)
@@ -838,7 +850,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
             colourAll.append(colour)
         return {'Vertices': vertexAll, 'Mesh': meshAll, 'Color': colourAll}
 
-    def prepareGL(self):
+    def PrepareGLObjects(self):
         colorAll = []
         vertexAll = []
         triangleAll = []
@@ -938,7 +950,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                 mesh = mesh.flatten()
             contour = None
             if self.show['contour']:
-                contour = self.prepareContour(l, r)
+                contour = self.PrepareContour(l, r)
             avertex = avertex.flatten()
             acolor = acolor.flatten()
             triangle = triangle.flatten()
@@ -950,7 +962,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         return {'block':block, 'Color':colorAll, 'Vertices':vertexAll,
                 'Trinagles':triangleAll, 'Mesh':meshAll, 'Contour':contourAll}
 
-    def setGLBuffer(self, v, c):
+    def SetGLBuffer(self, v, c):
         # vertex buffer
         # Bind it as The Current Buffer'
         glBindBuffer(GL_ARRAY_BUFFER, self.glBufs[0])
@@ -963,14 +975,14 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glBufferData(GL_ARRAY_BUFFER, c.astype(np.float32), GL_STATIC_DRAW)
         glVertexAttribPointer(self.VertexColor, 4, GL_FLOAT, GL_FALSE, 0, None)
 
-    def drawElementGL(self, t, v, m, o=0):
+    def DrawElement(self, t, v, m, o=0):
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.glBufs[2])
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, v.astype(np.uint16), GL_STATIC_DRAW)
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "mesh"), m)
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "VertexOriginal"), o)
         glDrawElements(t, v.size, GL_UNSIGNED_SHORT, None)
 
-    def drawAxisGL(self):
+    def DrawAxis(self):
         r = self.range
         gx = 32/self.scale['base']
         p = [r['xmax'], r['ymax'], r['zmax']]
@@ -982,7 +994,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                            p[0],      p[1], p[2],
                            p[0]-gx/3, p[1]+gx/5,   p[2],
                            p[0]-gx/3, p[1]-gx/5, p[2]])
-        self.drawAxisGL_help('x', vertex)
+        self.DrawAxisHelp('x', vertex)
         p = [r['xmin'], r['ymax'], r['zmax']]
         vertex = np.array([p[0],    p[1],    p[2],
                            p[0],    p[1]-gx, p[2],
@@ -992,7 +1004,7 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                            p[0], p[1],    p[2],
                            p[0]+gx/5,p[1]-gx/3,   p[2],
                            p[0]-gx/5,p[1]-gx/3, p[2]])
-        self.drawAxisGL_help('y', vertex)
+        self.DrawAxisHelp('y', vertex)
         p = [r['xmin'], r['ymin'], r['zmax']]
         vertex = np.array([p[0], p[1]+gx, p[2]-gx,
                            p[0], p[1],    p[2]-gx,
@@ -1002,9 +1014,9 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                            p[0], p[1],  p[2],
                            p[0], p[1]+gx/5, p[2]-gx/3,
                            p[0], p[1]-gx/5, p[2]-gx/3])
-        self.drawAxisGL_help('z', vertex)
+        self.DrawAxisHelp('z', vertex)
 
-    def drawAxisGL_help(self, letter, vertex):
+    def DrawAxisHelp(self, letter, vertex):
         W, H = 32, 32
         bitmap = wx.Bitmap(W, H, 32)
         tdc = wx.MemoryDC()
@@ -1033,7 +1045,6 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, texture)
 
-        gx = 2*32/self.W*self.scale['base']
         color = np.array([0, 1, 0, 1,
                           0, 0, 0, 1,
                           1, 0, 0, 1,
@@ -1045,39 +1056,37 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         triangle = np.array([0, 1, 2, 0, 2, 3])
         mesh = np.array([4, 5, 5, 6, 5, 7])
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
-        self.setGLBuffer(vertex, color)
-        self.drawElementGL(GL_TRIANGLES, triangle, 3)
-        self.drawElementGL(GL_LINES, mesh, 0)
+        self.SetGLBuffer(vertex, color)
+        self.DrawElement(GL_TRIANGLES, triangle, 3)
+        self.DrawElement(GL_LINES, mesh, 0)
 
-    def drawGL(self):
-
+    def Draw3dImg(self):
         if self.show['surface'] or self.show['mesh'] or self.show['contour']:
-            if not self.glObject:
-                self.glObject = self.prepareGL()
-            obj = self.glObject
+            if not self.globjects:
+                self.globjects = self.PrepareGLObjects()
+            obj = self.globjects
             block = obj.get('block', 0)
             for b in range(block):
-                self.setGLBuffer(obj['Vertices'][b], obj['Color'][b])
+                self.SetGLBuffer(obj['Vertices'][b], obj['Color'][b])
                 clr_mesh = 0
                 if self.show['surface']:
                     # if surface is on, show the mesh in blue
                     clr_mesh = 1
-                    self.drawElementGL(GL_QUADS, obj['Trinagles'][b], 0)
+                    self.DrawElement(GL_QUADS, obj['Trinagles'][b], 0)
                 if self.show['mesh']:
-                    self.drawElementGL(GL_LINES, obj['Mesh'][b], clr_mesh)
+                    self.DrawElement(GL_LINES, obj['Mesh'][b], clr_mesh)
 
                 if self.show['contour']:
                     ctr = obj['Contour'][b]
                     for c in range(len(ctr['Vertices'])):
-                        self.setGLBuffer(ctr['Vertices'][c], ctr['Color'][c])
-                        self.drawElementGL(GL_LINES, ctr['Mesh'][c], 0)
+                        self.SetGLBuffer(ctr['Vertices'][c], ctr['Color'][c])
+                        self.DrawElement(GL_LINES, ctr['Mesh'][c], 0)
 
-    def draw2dImg(self):
-        #Set Transformation Matrices
-        TransformMatrix = self.transformMatrix.flatten('F')
+    def Draw2dImg(self):
+        # Set Transformation Matrices, no rotation allowed in 2d mode
+        TransformMatrix = np.eye(3, dtype=np.float32).flatten('F')
         tmatrix = glGetUniformLocation(self.ShaderProgram, "TransformationMatrix")
         glUniformMatrix3fv(tmatrix, 1, GL_FALSE, TransformMatrix)
-
 
         W = self.dimension['x']
         H = self.dimension['y']
@@ -1111,10 +1120,10 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                           1-1./H, 1-1./W, 0, 1])
         triangle = np.array([0, 1, 2, 3])
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
-        self.setGLBuffer(vertex, color)
-        self.drawElementGL(GL_QUADS, triangle, 3)
+        self.SetGLBuffer(vertex, color)
+        self.DrawElement(GL_QUADS, triangle, 3)
 
-    def drawBox(self):
+    def DrawBox(self):
         if self.show['box']:
             r = self.range
             vertex = np.array([r['xmin'], r['ymin'], r['zmin'],
@@ -1135,34 +1144,37 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                               1, 1, 1, 1])
             axis = np.array([0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6,
                              6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7])
-            self.setGLBuffer(vertex, color)
-            self.drawElementGL(GL_LINES, axis, 0)
+            self.SetGLBuffer(vertex, color)
+            self.DrawElement(GL_LINES, axis, 0)
 
         if self.show['axis']:
-            self.drawAxisGL()
+            self.DrawAxis()
 
-    def drawBar(self, horz=True):
-        if horz:
+    def DrawBar(self):
+        if self.show['horz_bar']:
             y = self.selected['y']
-            if y < 0 or y >= self.rawPoints['z'].shape[0]:
+            if y < 0 or y >= self.raw_points['z'].shape[0]:
                 # out of range
                 return
-            d = self.rawPoints['z'][y, :]
-            self.horzbar_buf.update(d, self.data_zscale)
-            v, c, l = self.horzbar_buf.glObject()
-        else:
+            d = self.raw_points['z'][y, :]*self.data_zscale
+            self.horzbar_buf.SetData(d)
+            v, c, l = self.horzbar_buf.GetGLObject()
+            self.SetGLBuffer(v, c)
+            self.DrawElement(GL_LINE_STRIP, l, 0)
+
+        if self.show['vert_bar']:
             x = self.selected['x']
-            if x < 0 or x >= self.rawPoints['z'].shape[1]:
+            if x < 0 or x >= self.raw_points['z'].shape[1]:
                 # out of range
                 return
-            d = self.rawPoints['z'][:, x]
-            self.vertbar_buf.update(d, self.data_zscale)
-            v, c, l = self.vertbar_buf.glObject()
+            d = self.raw_points['z'][:, x]*self.data_zscale
+            self.vertbar_buf.SetData(d)
+            v, c, l = self.vertbar_buf.GetGLObject()
 
-        self.setGLBuffer(v, c)
-        self.drawElementGL(GL_LINE_STRIP, l, 0)
+            self.SetGLBuffer(v, c)
+            self.DrawElement(GL_LINE_STRIP, l, 0)
 
-    def draw(self):
+    def Draw(self):
         glClearColor(0.0, 0.0, 0.0, 1.0)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
@@ -1176,10 +1188,11 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glUniform3f(vertexOffset, ox, oy, self.offset['base']['x'])
 
         vertexOffsetData = glGetUniformLocation(self.ShaderProgram, "VertexOffsetData")
-        glUniform3f(vertexOffsetData, self.dataOffset['x'], self.dataOffset['y'], self.dataOffset['z'])
+        glUniform3f(vertexOffsetData, self.data_offset['x'],
+                    self.data_offset['y'], self.data_offset['z'])
 
         #Set Transformation Matrices
-        TransformMatrix = self.transformMatrix.flatten('F')
+        TransformMatrix = self.rotate_matrix.flatten('F')
         tmatrix = glGetUniformLocation(self.ShaderProgram, "TransformationMatrix")
         glUniformMatrix3fv(tmatrix, 1, GL_FALSE, TransformMatrix)
 
@@ -1193,18 +1206,15 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         glUniform3f(vertexScale, scaleAll, scaleAll, 1)
 
         if self.mode_2d:
-            self.draw2dImg()
+            self.Draw2dImg()
         else:
-            self.drawGL()
-            self.drawBox()
+            self.Draw3dImg()
+            self.DrawBox()
         glLineWidth(2.0)
-        if self.show['horz_bar']:
-            self.drawBar()
-        if self.show['vert_bar']:
-            self.drawBar(False)
-        self.drawHud()
+        self.DrawBar()
+        self.DrawHud()
 
-    def drawHud(self):
+    def DrawHud(self):
         if not self._hudtext and not self.hudtext:
             return
         W, H = int(self.W), int(self.H)
@@ -1248,50 +1258,59 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
                           1, 1, 0, 1,
                           1, 0, 0, 1])
         triangle = np.array([0, 1, 2, 3])
-        glUniform1i(self.fraguSampler, 0)
-        self.setGLBuffer(vertex, color)
-        self.drawElementGL(GL_QUADS, triangle, 3, 1)
+        glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
+        self.SetGLBuffer(vertex, color)
+        self.DrawElement(GL_QUADS, triangle, 3, 1)
 
-    def rotate(self, x, y, z):
+    def Rotate(self, x, y, z):
         if x == 0 and y == 0 and z == 0:
             return
-        R = self.transformMatrix
+        R = self.rotate_matrix
         if x != 0:
-            Rx = self.xRotateMatrix(x)
+            Rx = self.GetRotateMatrixX(x)
             R = np.matmul(Rx, R)
         if y != 0:
-            Ry = self.yRotateMatrix(y)
+            Ry = self.GetRotateMatrixY(y)
             R = np.matmul(Ry, R)
         if z != 0:
-            Rz = self.zRotateMatrix(z)
+            Rz = self.GetRotateMatrixZ(z)
             R = np.matmul(Rz, R)
         self.rotation = {'x':0, 'y':0, 'z':0}
-        self.transformMatrix = R
+        self.rotate_matrix = R
         self.Refresh()
 
-    def xRotateMatrix(self, sign):
+    def SetRotateDelta(self, delta):
+        self.rotate_delta = delta
+
+    def GetRotateDelta(self):
+        return self.rotate_delta
+
+    def GetRotateMatrixX(self, sign):
         Rx = np.zeros((3, 3), np.float32)
+        theta = sign*self.rotate_delta
         Rx[0][0] = 1
-        Rx[1][1] = math.cos(sign*self.rotateTheta)
-        Rx[1][2] = -math.sin(sign*self.rotateTheta)
-        Rx[2][1] = math.sin(sign*self.rotateTheta)
-        Rx[2][2] = math.cos(sign*self.rotateTheta)
+        Rx[1][1] = math.cos(theta)
+        Rx[1][2] = -math.sin(theta)
+        Rx[2][1] = math.sin(theta)
+        Rx[2][2] = math.cos(theta)
         return Rx
 
-    def yRotateMatrix(self, sign):
+    def GetRotateMatrixY(self, sign):
         Ry = np.zeros((3, 3), np.float32)
-        Ry[0][0] = math.cos(sign*self.rotateTheta)
-        Ry[0][2] = math.sin(sign*self.rotateTheta)
+        theta = sign*self.rotate_delta
+        Ry[0][0] = math.cos(theta)
+        Ry[0][2] = math.sin(theta)
         Ry[1][1] = 1
-        Ry[2][0] = -math.sin(sign*self.rotateTheta)
-        Ry[2][2] = math.cos(sign*self.rotateTheta)
+        Ry[2][0] = -math.sin(theta)
+        Ry[2][2] = math.cos(theta)
         return Ry
 
-    def zRotateMatrix(self, sign):
+    def GetRotateMatrixZ(self, sign):
         Rz = np.zeros((3, 3), np.float32)
-        Rz[0][0] = math.cos(sign*self.rotateTheta)
-        Rz[0][1] = -math.sin(sign*self.rotateTheta)
-        Rz[1][0] = math.sin(sign*self.rotateTheta)
-        Rz[1][1] = math.cos(sign*self.rotateTheta)
+        theta = sign*self.rotate_delta
+        Rz[0][0] = math.cos(theta)
+        Rz[0][1] = -math.sin(theta)
+        Rz[1][0] = math.sin(theta)
+        Rz[1][1] = math.cos(theta)
         Rz[2][2] = 1
         return Rz
