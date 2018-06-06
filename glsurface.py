@@ -111,7 +111,7 @@ class SimpleBarBuf(object):
             xmax, xmin = self.range['xmax'], self.range['xmin']
             self.vertex[:, 0] = xmax-(np.kron(d, [0, 1, 1, 0])).flatten()
 
-class SimpleSurfaceCanvas(glcanvas.GLCanvas):
+class SurfaceBase(glcanvas.GLCanvas):
     ID_SHOW_2D = wx.NewId()
     ID_SHOW_TRIANGLE = wx.NewId()
     ID_SHOW_MESH = wx.NewId()
@@ -1314,3 +1314,205 @@ class SimpleSurfaceCanvas(glcanvas.GLCanvas):
         Rz[1][1] = math.cos(theta)
         Rz[2][2] = 1
         return Rz
+
+class SelectedPixelBuf(object):
+    def __init__(self, sz):
+        self.idx = 0
+        self.Resize(sz)
+
+    def Resize(self, sz):
+        self.buf = np.ones(sz)
+        self.vertex = np.ones((sz, 3))*700
+        self.color = np.repeat(np.array([[1, 1, 1, 1]]), sz, axis=0).flatten()
+        self.line = np.arange(sz)
+        self.idx = 0
+
+    def GetGLObject(self, l, r, t, b, o, g):
+        self.vertex[:, 0] = np.linspace(l, r, self.buf.size, endpoint=False)
+        self.vertex[:, 1] = b-(np.roll(self.buf, -(self.idx+1))-o)*g
+        return self.vertex.flatten(), self.color, self.line
+
+    def SetSelectedPos(self, pos):
+        # pos is within [-self.buf.size+1, 0]
+        self.color.fill(1)
+        pos = self.buf.size - 1 + pos
+        if pos >= 0 and pos < self.buf.size:
+            self.color[pos*4:(pos+1)*4] = [1, 0, 0, 1]
+
+    def SetData(self, d, idx):
+        self.idx = idx
+        self.buf[idx] = d
+
+class TrackingSurface(SurfaceBase):
+    DISPLAY_ORIGINAL = 0
+    DISPLAY_MAX = 1
+    DISPLAY_MIN = 2
+    DISPLAY_MINMAX = 3
+    ID_SIM_CLEAR = wx.NewId()
+    ID_DISP_ORIGINAL = wx.NewId()
+    ID_DISP_MAX = wx.NewId()
+    ID_DISP_MIN = wx.NewId()
+    ID_DISP_MINMAX = wx.NewId()
+    def __init__(self, parent, points=None, buf_len=256):
+        self.frames = None
+        SurfaceBase.__init__(self, parent, points)
+        self.buf_len = buf_len
+        self.frames_idx = 0
+        self.display_mode = self.DISPLAY_ORIGINAL
+        self.frame_display = None
+        self.selected_buf = None
+
+        self.SetBufLen(buf_len)
+
+    def GetAccelList(self):
+        accel_tbl = super(TrackingSurface, self).GetAccelList()
+        accel_tbl += [(wx.ACCEL_CTRL, ord('K'), self.ID_SIM_CLEAR),
+                      (wx.ACCEL_SHIFT, ord('M'), self.ID_DISP_MAX),
+                      (wx.ACCEL_SHIFT, ord('O'), self.ID_DISP_ORIGINAL),
+                      (wx.ACCEL_SHIFT, ord('N'), self.ID_DISP_MIN),
+                      (wx.ACCEL_SHIFT, ord('R'), self.ID_DISP_MINMAX)]
+        return accel_tbl
+
+    def SetBufLen(self, sz):
+        self.buf_len = sz
+        self.frames = None
+        self.frame_display = None
+        self.frames_idx = 0
+        self.selected_buf = SelectedPixelBuf(self.buf_len)
+
+    def GetBufLen(self):
+        return self.buf_len
+
+    def UpdateHudText(self):
+        if self.frames is None or not self.frames.size:
+            self.hudtext = ""
+            return
+        _, rows, cols = self.frames.shape
+        r = self.selected['y']
+        c = self.selected['x']
+        if r >= 0 and c >= 0 and r < rows and c < cols:
+            d = self.frames[:, r, c]
+            m = np.min(d)
+            M = np.max(d)
+            mn = np.mean(d)
+            std = np.std(d)
+            d = self.raw_points['z'][r, c]
+            self.SetHudText('(%d, %d) %4d min: %4d max: %4d mean: %.2f std: %.2f'%
+                            (c, r, d, m, M, mn, std))
+
+    def GetFrame(self, num):
+        # get the num th frame,
+        #   0: the latest frame
+        #  -1: the 2nd latest frame
+        #  ...
+        idx = (self.buf_len - 1 + num)%self.buf_len
+        return self.frames[idx, :, :]
+
+    def SetCurrentFrame(self, num):
+        # show the num th frame,
+        #   0: the latest frame
+        #  -1: the 2nd latest frame
+        #  ...
+        self.UpdateImage(self.GetFrame(num))
+        self.selected_buf.SetSelectedPos(num)
+
+    def NewFrameArrive(self, frame, silent=True):
+        rows, cols = frame.shape
+        if self.frames is None or rows != self.frames.shape[1] or cols != self.frames.shape[2]:
+            self.frames = np.zeros((self.buf_len, rows, cols))
+            self.frames_idx = 0
+            self.SetImage({'z':frame})
+
+        # all the following code is time sensitive, needs to finish as soon
+        # as possible
+        if self.frame_display is not None:
+            if self.display_mode == self.DISPLAY_MAX:
+                frame = np.maximum(frame, self.frame_display)
+            elif self.display_mode == self.DISPLAY_MIN:
+                frame = np.minimum(frame, self.frame_display)
+            elif self.display_mode == self.DISPLAY_MINMAX:
+                frame = np.where(np.absolute(frame) > np.absolute(self.frame_display),
+                                 frame, self.frame_display)
+        self.frame_display = frame
+
+        if self.frames.size:
+            self.frames[self.frames_idx, :, :] = frame
+            r, c = self.selected['y'], self.selected['x']
+            if r >= 0 and c >= 0 and r < rows and c < cols:
+                self.selected_buf.SetData(frame[r, c], self.frames_idx)
+            else:
+                self.SetSelected({'x': 0, 'y':0})
+
+        if not silent:
+            # update the data
+            self.UpdateImage(frame)
+
+        self.frames_idx += 1
+        self.frames_idx %= self.buf_len
+
+    def Clear(self):
+        self.frame_display = None
+        self.frames = None
+
+    def Draw(self):
+        super(TrackingSurface, self).Draw()
+        if not self.frames is None:
+            self.DrawSelectedBuf()
+
+    def DrawSelectedBuf(self):
+        if self.frames is None:
+            return
+        xmax, xmin = self.range['xmax'], self.range['xmin']
+        ymax, ymin = self.range['ymax'], self.range['ymin']
+        if self.default_rotate in [90, 270]:
+            o = self.data_offset['y'] - self.data_offset['x']
+            xmax, xmin, ymax, ymin = ymax-o, ymin-o, xmax, xmin
+        v, c, l = self.selected_buf.GetGLObject(xmin, xmax, ymin, ymax,
+                   self.data_offset['z']-self.data_offset['y']/self.data_zscale,
+                                             self.data_zscale)
+        self.SetGLBuffer(v, c)
+        self.DrawElement(GL_LINE_STRIP, l, 0, 2)
+
+    def GetContextMenu(self):
+        menu = super(TrackingSurface, self).GetContextMenu()
+        if not menu:
+            menu = wx.Menu()
+        else:
+            menu.AppendSeparator()
+        display = wx.Menu()
+        display.Append(self.ID_DISP_ORIGINAL, 'Original\tshift+o', '', wx.ITEM_CHECK)
+        display.Append(self.ID_DISP_MAX, 'Max\tshift+m', '', wx.ITEM_CHECK)
+        display.Append(self.ID_DISP_MIN, 'Min\tshift+n', '', wx.ITEM_CHECK)
+        display.Append(self.ID_DISP_MINMAX, 'Min-Max\tshift+r', '', wx.ITEM_CHECK)
+        menu.AppendSubMenu(display, 'Display')
+        return menu
+
+    def OnUpdateMenu(self, event):
+        eid = event.GetId()
+        if eid == self.ID_DISP_ORIGINAL:
+            event.Check(self.display_mode == self.DISPLAY_ORIGINAL)
+        elif eid == self.ID_DISP_MAX:
+            event.Check(self.display_mode == self.DISPLAY_MAX)
+        elif eid == self.ID_DISP_MIN:
+            event.Check(self.display_mode == self.DISPLAY_MIN)
+        elif eid == self.ID_DISP_MINMAX:
+            event.Check(self.display_mode == self.DISPLAY_MINMAX)
+        elif eid == self.ID_SHOW_PATH:
+            event.Check(self.show['path'])
+        else:
+            super(TrackingSurface, self).OnUpdateMenu(event)
+
+    def OnProcessMenuEvent(self, event):
+        eid = event.GetId()
+        if eid == self.ID_SIM_CLEAR:
+            self.Clear()
+        elif eid == self.ID_DISP_ORIGINAL:
+            self.display_mode = self.DISPLAY_ORIGINAL
+        elif eid == self.ID_DISP_MAX:
+            self.display_mode = self.DISPLAY_MAX
+        elif eid == self.ID_DISP_MIN:
+            self.display_mode = self.DISPLAY_MIN
+        elif eid == self.ID_DISP_MINMAX:
+            self.display_mode = self.DISPLAY_MINMAX
+        else:
+            super(TrackingSurface, self).OnProcessMenuEvent(event)

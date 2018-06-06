@@ -2,7 +2,7 @@ import wx
 import wx.lib.agw.aui as aui
 import wx.py as py
 import numpy as np
-from glsurface import SimpleSurfaceCanvas
+from glsurface import SurfaceBase
 
 class RunApp(wx.App):
     def __init__(self):
@@ -38,6 +38,7 @@ class mainFrame(wx.Frame):
         pane = self._mgr.GetPane(self.shell)
         self._mgr.MinimizePane(pane)
         self._mgr.Update()
+
 class SurfacePanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent, -1)
@@ -46,7 +47,7 @@ class SurfacePanel(wx.Panel):
         y = xy[1]
         z = np.sinc(x)*np.sinc(y)
         sizer = wx.BoxSizer(wx.VERTICAL)
-        self.canvas = SimpleSurfaceCanvas(self, {'x':x, 'y':y, 'z':z})
+        self.canvas = SurfaceBase(self, {'x':x, 'y':y, 'z':z})
         sizer.Add(self.canvas, 1, wx.EXPAND | wx.ALL, 5)
         self.SetSizer(sizer)
         self.Layout()
