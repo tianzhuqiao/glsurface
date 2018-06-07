@@ -117,7 +117,7 @@ class SurfacePanel(wx.Panel):
             event.Skip()
 
     def OnTimer(self, event):
-        self.x += 0.05
+        self.x += 0.01*2*np.pi
         self.x %= 2*np.pi
         z = np.cos(self.x).T*np.sin(self.x)
         self.canvas.NewFrameArrive(z, False)
