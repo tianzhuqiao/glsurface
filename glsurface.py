@@ -31,6 +31,10 @@ void main(void) {
     } else if (VertexOriginal == 2) {
         gl_Position = vec4((((VertexPosition-VertexOffsetData)*VertexScaleData)*VertexScale+VertexOffset)/VertexResolution*2.0-1.0, 1.0);
         gl_Position = gl_Position*vec4(VertexScaleGL,1);
+    } else if (VertexOriginal == 3) {
+        gl_Position = vec4(((TransformationMatrix*((VertexPosition-VertexOffsetData)*VertexScaleData)*VertexScale)+VertexOffset)/VertexResolution*2.0-1.0, 1.0);
+        gl_Position = gl_Position*vec4(VertexScaleGL,1);
+        gl_Position = gl_Position + abs(gl_Position)*vec4(0, 0, -0.03, 0);
     } else {
         gl_Position = vec4(((TransformationMatrix*((VertexPosition-VertexOffsetData)*VertexScaleData)*VertexScale)+VertexOffset)/VertexResolution*2.0-1.0, 1.0);
         gl_Position = gl_Position*vec4(VertexScaleGL,1);
@@ -113,6 +117,7 @@ class SimpleBarBuf(object):
 
 class SurfaceBase(glcanvas.GLCanvas):
     ID_SHOW_2D = wx.NewId()
+    ID_SHOW_STEP_SURFACE = wx.NewId()
     ID_SHOW_TRIANGLE = wx.NewId()
     ID_SHOW_MESH = wx.NewId()
     ID_SHOW_CONTOUR = wx.NewId()
@@ -160,6 +165,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.show = {'surface': True, 'mesh': False, 'contour': False,
                      'box':False, 'axis':False, 'horz_bar': False,
                      'vert_bar': False}
+        self.show_step_surface = True
         self.contour_levels = 100
         self.rotate_matrix = np.eye(3, dtype=np.float32)
         self.color_map = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1],
@@ -175,9 +181,11 @@ class SurfaceBase(glcanvas.GLCanvas):
         rows, cols = self.raw_points['z'].shape
         self.horzbar_buf = SimpleBarBuf(cols, self.range, True)
         self.vertbar_buf = SimpleBarBuf(rows, self.range, False)
-        self.SetImage(self.raw_points)
 
-        self.ResetRotate()
+        # Ugly. do not call SetImage or similar methods here, since it may be
+        # overridden or may call some overridden methods. Instead, it should be
+        # put in Initialize() method
+        #self.SetImage(self.raw_points)
 
         accel_tbl = self.GetAccelList()
         self.SetAcceleratorTable(wx.AcceleratorTable(accel_tbl))
@@ -215,8 +223,10 @@ class SurfaceBase(glcanvas.GLCanvas):
         elements = wx.Menu()
         elements.Append(self.ID_SHOW_2D, 'Show 2D Mode', '', wx.ITEM_CHECK)
         elements.AppendSeparator()
+        elements.Append(self.ID_SHOW_STEP_SURFACE, 'Step Surface', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_TRIANGLE, 'Show Surface\tshift+s', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_MESH, 'Show Mesh', '', wx.ITEM_CHECK)
+        elements.AppendSeparator()
         elements.Append(self.ID_SHOW_CONTOUR, 'Show Contour', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_BOX, 'Show Box', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_AXIS, 'Show Axis', '', wx.ITEM_CHECK)
@@ -242,6 +252,13 @@ class SurfaceBase(glcanvas.GLCanvas):
     def Get2dMode(self):
         return self.mode_2d
 
+    def SetShowStepSurface(self, step):
+        self.show_step_surface = step
+        self.Invalidate()
+
+    def GetShowStepSurface(self):
+        return self.show_step_surface
+
     def SetShowMode(self, **kwargs):
         refresh = False
         genGLobj = False
@@ -262,6 +279,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         if eid == self.ID_SHOW_2D:
             self.Set2dMode(not self.mode_2d)
             self.Refresh()
+        elif eid == self.ID_SHOW_STEP_SURFACE:
+            self.SetShowStepSurface(not self.GetShowStepSurface())
         elif eid == self.ID_SHOW_TRIANGLE:
             show['surface'] = not self.show['surface']
         elif eid == self.ID_SHOW_MESH:
@@ -296,6 +315,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         eid = event.GetId()
         if eid == self.ID_SHOW_2D:
             event.Check(self.mode_2d)
+        elif eid == self.ID_SHOW_STEP_SURFACE:
+            event.Check(self.GetShowStepSurface())
         elif eid == self.ID_SHOW_TRIANGLE:
             event.Check(self.show['surface'])
         elif eid == self.ID_SHOW_MESH:
@@ -356,12 +377,16 @@ class SurfaceBase(glcanvas.GLCanvas):
         #dc = wx.PaintDC(self)
         self.SetCurrent(self.context)
         if not self.initialized:
-            self.InitGL()
-            if self.raw_points is not None:
-                self.SetImage(self.raw_points)
+            self.Initialize()
             self.initialized = True
         self.Draw()
         self.SwapBuffers()
+
+    def Initialize(self):
+        self.InitGL()
+        if self.raw_points is not None:
+            self.SetImage(self.raw_points)
+            self.ResetRotate()
 
     def InitGL(self):
         self.SetCurrent(self.context)
@@ -371,6 +396,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         glDepthFunc(GL_LEQUAL) # Set Perspective View
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glEnable(GL_BLEND)
+
+        glEnable(GL_LINE_SMOOTH)
 
         FShader = fragShaderSource
         VShader = vtxShaderSource
@@ -868,11 +895,18 @@ class SurfaceBase(glcanvas.GLCanvas):
         for k in range(1, len(blocks)):
             l, r = r, blocks[k]
             acolor = np.repeat(self.pointsClr[np.arange(l, min(r+my+1, len(P)))], 4, axis=0)
-            # for each point (x[i], y[i], z[i]), construct a quad with
-            # (x[i],   y[i],   z[i])
-            # (x[i+1], y[i],   z[i])
-            # (x[i+1], y[i+1], z[i])
-            # (x[i],   y[i+1], z[i])
+            # for each point (x[i], y[j], z[i,j]), construct a quad
+            # when show_step_surface is true
+            # (x[i],   y[i],   z[i,j])
+            # (x[i+1], y[i],   z[i,j])
+            # (x[i+1], y[i+1], z[i,j])
+            # (x[i],   y[i+1], z[i,j])
+            # otherwise
+            # (x[i],   y[i],   z[i,j])
+            # (x[i+1], y[i],   z[i,j])
+            # (x[i+1], y[i+1], z[i,j])
+            # (x[i],   y[i+1], z[i,j])
+
             avertex = np.zeros(((min(r+my+1, len(P)) - l)*4, 3))
             # the index
             idx = np.arange(l, min(r+my+1, len(P)))
@@ -890,8 +924,13 @@ class SurfaceBase(glcanvas.GLCanvas):
             # update the vertex of each quad
             avertex[:, 0] = P[(cc*my + rr), 0]
             avertex[:, 1] = P[(cc*my + rr), 1]
-            # the quad use the same z value of (i, j)
-            avertex[:, 2] = P[idx.flatten(), 2]
+            if self.show_step_surface:
+                # x, y
+                avertex[:, 0:-1] = P[(cc*my + rr), 0:-1]
+                # the quad use the same z value of (i, j)
+                avertex[:, 2] = P[idx.flatten(), 2]
+            else:
+                avertex[:, :] = P[(cc*my + rr), :]
 
             # index for quad and mesh
             idx = np.arange(0, r-l)
@@ -1074,7 +1113,7 @@ class SurfaceBase(glcanvas.GLCanvas):
                     clr_mesh = 1
                     self.DrawElement(GL_QUADS, obj['Trinagles'][b], 0)
                 if self.show['mesh']:
-                    self.DrawElement(GL_LINES, obj['Mesh'][b], clr_mesh)
+                    self.DrawElement(GL_LINES, obj['Mesh'][b], clr_mesh, 3)
 
                 if self.show['contour']:
                     ctr = obj['Contour'][b]
@@ -1354,15 +1393,17 @@ class TrackingSurface(SurfaceBase):
     ID_DISP_MIN = wx.NewId()
     ID_DISP_MINMAX = wx.NewId()
     def __init__(self, parent, points=None, buf_len=256):
-        self.frames = None
         SurfaceBase.__init__(self, parent, points)
         self.buf_len = buf_len
+        self.frames = None
         self.frames_idx = 0
         self.display_mode = self.DISPLAY_ORIGINAL
         self.frame_display = None
         self.selected_buf = None
 
-        self.SetBufLen(buf_len)
+    def Initialize(self):
+        self.SetBufLen(self.buf_len)
+        super(TrackingSurface, self).Initialize()
 
     def GetAccelList(self):
         accel_tbl = super(TrackingSurface, self).GetAccelList()
@@ -1397,7 +1438,7 @@ class TrackingSurface(SurfaceBase):
             mn = np.mean(d)
             std = np.std(d)
             d = self.raw_points['z'][r, c]
-            self.SetHudText('(%d, %d) %4d min: %4d max: %4d mean: %.2f std: %.2f'%
+            self.SetHudText('(%d, %d) %f min: %f max: %f mean: %.2f std: %.2f'%
                             (c, r, d, m, M, mn, std))
 
     def GetFrame(self, num):
@@ -1497,8 +1538,6 @@ class TrackingSurface(SurfaceBase):
             event.Check(self.display_mode == self.DISPLAY_MIN)
         elif eid == self.ID_DISP_MINMAX:
             event.Check(self.display_mode == self.DISPLAY_MINMAX)
-        elif eid == self.ID_SHOW_PATH:
-            event.Check(self.show['path'])
         else:
             super(TrackingSurface, self).OnUpdateMenu(event)
 
