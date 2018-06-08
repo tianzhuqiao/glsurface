@@ -182,6 +182,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.horzbar_buf = SimpleBarBuf(cols, self.range, True)
         self.vertbar_buf = SimpleBarBuf(rows, self.range, False)
 
+        self.background_color = [0, 0, 0, 1]
+
         # Ugly. do not call SetImage or similar methods here, since it may be
         # overridden or may call some overridden methods. Instead, it should be
         # put in Initialize() method
@@ -243,6 +245,13 @@ class SurfaceBase(glcanvas.GLCanvas):
         menu.AppendSeparator()
         menu.AppendSubMenu(rotate, 'Orientation')
         return menu
+
+    def SetSurfaceBackground(self, clr):
+        self.background_color = clr
+        self.Refresh()
+
+    def GetSurfaceBackground(Self):
+        return self.background_color
 
     def Set2dMode(self, is2d):
         self.mode_2d = is2d
@@ -688,10 +697,12 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.Pz[0:rows, 0:cols] = points
         self.Pz[-1, :] = self.Pz[-2, :]
         self.Pz[:, -1] = self.Pz[:, -2]
-        if self.show['surface']:
-            self.points[:, 2] = self.Pz.T.flatten()
-        else:
+        if self.mode_2d and not self.show['surface']:
+            # in 2d mode, point will only affect surface
             self.points[:, 2].fill(0)
+        else:
+            self.points[:, 2] = self.Pz.T.flatten()
+
         self.Invalidate()
 
     def SetDimension(self, rows, cols):
@@ -1105,6 +1116,7 @@ class SurfaceBase(glcanvas.GLCanvas):
                 self.globjects = self.PrepareGLObjects()
             obj = self.globjects
             block = obj.get('block', 0)
+            glLineWidth(0.5)
             for b in range(block):
                 self.SetGLBuffer(obj['Vertices'][b], obj['Color'][b])
                 clr_mesh = 0
@@ -1163,6 +1175,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.DrawElement(GL_QUADS, triangle, 3)
 
     def DrawBox(self):
+        glLineWidth(2)
         if self.show['box']:
             r = self.range
             vertex = np.array([r['xmin'], r['ymin'], r['zmin'],
@@ -1190,6 +1203,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             self.DrawAxis()
 
     def DrawBar(self):
+        glLineWidth(2.0)
         if self.show['horz_bar']:
             y = self.selected['y']
             if y < 0 or y >= self.raw_points['z'].shape[0]:
@@ -1214,7 +1228,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             self.DrawElement(GL_LINE_STRIP, l, 0)
 
     def Draw(self):
-        glClearColor(0.0, 0.0, 0.0, 1.0)
+        glClearColor(*self.background_color)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         #Setup shader
@@ -1249,7 +1263,6 @@ class SurfaceBase(glcanvas.GLCanvas):
         else:
             self.Draw3dImg()
             self.DrawBox()
-        glLineWidth(2.0)
         self.DrawBar()
         self.DrawHud()
 

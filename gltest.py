@@ -66,6 +66,13 @@ class Surface(TrackingSurface):
                                        [-0.06383575,  0.40237066,  0.91324866]],
                                       dtype=np.float32)
 
+def BitmapFromXPM(xpm):
+    xpm_b = [x.encode('utf-8') for x in xpm]
+    if 'phoenix' in wx.version():
+        return wx.Bitmap(xpm_b)
+    else:
+        return wx.BitmapFromXPMData(xpm_b)
+
 class SurfacePanel(wx.Panel):
     ID_RUN = wx.NewId()
     ID_PAUSE = wx.NewId()
@@ -79,8 +86,8 @@ class SurfacePanel(wx.Panel):
         tb = aui.AuiToolBar(self, -1, wx.DefaultPosition, wx.DefaultSize,
                             agwStyle=aui.AUI_TB_OVERFLOW|aui.AUI_TB_PLAIN_BACKGROUND)
         tb.SetToolBitmapSize(wx.Size(16, 16))
-        tb.AddSimpleTool(self.ID_RUN, "Run", wx.Bitmap(run_xpm))
-        tb.AddSimpleTool(self.ID_PAUSE, "Pause", wx.Bitmap(pause_xpm))
+        tb.AddSimpleTool(self.ID_RUN, "Run", BitmapFromXPM(run_xpm))
+        tb.AddSimpleTool(self.ID_PAUSE, "Pause", BitmapFromXPM(pause_xpm))
         tb.Realize()
         sizer.Add(tb, 0, wx.EXPAND, 0)
 
