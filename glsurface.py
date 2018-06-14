@@ -250,7 +250,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.background_color = clr
         self.Refresh()
 
-    def GetSurfaceBackground(Self):
+    def GetSurfaceBackground(self):
         return self.background_color
 
     def Set2dMode(self, is2d):
@@ -1368,14 +1368,28 @@ class SurfaceBase(glcanvas.GLCanvas):
         return Rz
 
 class SelectedPixelBuf(object):
-    def __init__(self, sz):
+    def __init__(self, sz, rng):
         self.idx = 0
+        self.range = rng
+        self.buf_size = sz
+        self.line_color = [1., 1., 1., 1.]
         self.Resize(sz)
 
+    def SetRange(self, rng):
+        self.range = rng
+        self.Resize(self.buf_size)
+
+    def SetColor(self, clr):
+        self.line_color = clr
+        if self.buf_size > 0:
+            self.color = np.repeat(np.array([clr]), self.buf_size, axis=0).flatten()
+
     def Resize(self, sz):
-        self.buf = np.ones(sz)
-        self.vertex = np.ones((sz, 3))*700
-        self.color = np.repeat(np.array([[1, 1, 1, 1]]), sz, axis=0).flatten()
+        self.buf_size = sz
+        self.buf = np.zeros(sz)
+        # make z value larger than zmax, so it shows on top of the surface.
+        self.vertex = np.ones((sz, 3))*self.range['zmax']*2.0
+        self.color = np.repeat(np.array([self.line_color]), sz, axis=0).flatten()
         self.line = np.arange(sz)
         self.idx = 0
 
@@ -1432,10 +1446,14 @@ class TrackingSurface(SurfaceBase):
         self.frames = None
         self.frame_display = None
         self.frames_idx = 0
-        self.selected_buf = SelectedPixelBuf(self.buf_len)
+        self.selected_buf = SelectedPixelBuf(self.buf_len, self.range)
 
     def GetBufLen(self):
         return self.buf_len
+
+    def SetRange(self, rng):
+        super(TrackingSurface, self).SetRange(rng)
+        self.selected_buf.SetRange(rng)
 
     def UpdateHudText(self):
         if self.frames is None or not self.frames.size:
