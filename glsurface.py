@@ -1542,8 +1542,15 @@ class TrackingSurface(SurfaceBase):
         v, c, l = self.selected_buf.GetGLObject(xmin, xmax, ymin, ymax,
                    self.data_offset['z']-self.data_offset['y']/self.data_zscale,
                                              self.data_zscale)
-        self.SetGLBuffer(v, c)
-        self.DrawElement(GL_LINE_STRIP, l, 0, 2)
+        if len(l) >= 2**16-10:
+            # if the buffer length is larger, draw line with multiple sections
+            for s in range(0, len(l), 2**16-10):
+                e = min(s+2**16-10+1, len(l))
+                self.SetGLBuffer(v[s*3:e*3], c[s*4:e*4])
+                self.DrawElement(GL_LINE_STRIP, l[s:e]-l[s], 0, 2)
+        else:
+            self.SetGLBuffer(v, c)
+            self.DrawElement(GL_LINE_STRIP, l, 0, 2)
 
     def GetContextMenu(self):
         menu = super(TrackingSurface, self).GetContextMenu()
