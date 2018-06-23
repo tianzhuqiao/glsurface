@@ -65,17 +65,21 @@ void main(void) {
 class SimpleBarBuf(object):
     def __init__(self, sz, rng, horz, clr=[0, 0.6, 0, 1]):
         self.horz = horz
-        self.range = rng
-        self.bar_color = clr
-        self.buf_size = sz
-        self.Resize(self.buf_size)
+        self.range = dict(rng)
+        self.bar_color = clr[:]
+        self.buf_size = -1
+        self.Resize(sz)
 
     def SetRange(self, rng):
-        self.range = rng
+        if rng == self.range:
+            return
+        self.range.update(rng)
         self.Resize(self.buf_size)
 
     def SetColor(self, clr):
-        self.bar_color = clr
+        if clr == self.bar_color:
+            return
+        self.bar_color = clr[:]
         if self.buf_size > 0:
             self.color = np.repeat(np.array([clr]), self.buf_size*4, axis=0)
 
@@ -1370,17 +1374,21 @@ class SurfaceBase(glcanvas.GLCanvas):
 class SelectedPixelBuf(object):
     def __init__(self, sz, rng):
         self.idx = 0
-        self.range = rng
-        self.buf_size = sz
+        self.range = dict(rng)
         self.line_color = [1., 1., 1., 1.]
+        self.buf_size = -1
         self.Resize(sz)
 
     def SetRange(self, rng):
-        self.range = rng
+        if self.range == rng:
+            return
+        self.range.update(rng)
         self.Resize(self.buf_size)
 
     def SetColor(self, clr):
-        self.line_color = clr
+        if self.line_color == clr:
+            return
+        self.line_color = clr[:]
         if self.buf_size > 0:
             self.color = np.repeat(np.array([clr]), self.buf_size, axis=0).flatten()
 
@@ -1401,7 +1409,7 @@ class SelectedPixelBuf(object):
     def SetSelectedPos(self, pos):
         # pos is within [-self.buf.size+1, 0]
         self.color.fill(1)
-        pos = self.buf.size - 1 + pos
+        pos = (self.buf.size - 1 + pos)%self.buf.size
         if pos >= 0 and pos < self.buf.size:
             self.color[pos*4:(pos+1)*4] = [1, 0, 0, 1]
 
@@ -1477,7 +1485,9 @@ class TrackingSurface(SurfaceBase):
         #   0: the latest frame
         #  -1: the 2nd latest frame
         #  ...
-        idx = (self.buf_len - 1 + num)%self.buf_len
+        if self.frames is None:
+            return None
+        idx = (self.frames_idx - 1 + num)%self.buf_len
         return self.frames[idx, :, :]
 
     def SetCurrentFrame(self, num):
@@ -1485,6 +1495,8 @@ class TrackingSurface(SurfaceBase):
         #   0: the latest frame
         #  -1: the 2nd latest frame
         #  ...
+        if self.frames is None:
+            return
         self.UpdateImage(self.GetFrame(num))
         self.selected_buf.SetSelectedPos(num)
 
