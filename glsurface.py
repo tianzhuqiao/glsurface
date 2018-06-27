@@ -153,7 +153,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         sz = self.GetClientSize()
         self.W = sz.x
         self.H = sz.y
-        self.range = {'xmin':0, 'ymin':0, 'zmin':0, 'xmax':0, 'ymax':0, 'zmax':0}
+        self.range = {'xmin':0, 'ymin':0, 'zmin':0, 'xmax':0, 'ymax':0, 'zmax':1}
         self.zrange = []
         self.scale = {'base':1, 'zoom':1}
         self.rotate_delta = 0.05
@@ -390,8 +390,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         #dc = wx.PaintDC(self)
         self.SetCurrent(self.context)
         if not self.initialized:
-            self.Initialize()
             self.initialized = True
+            self.Initialize()
         self.Draw()
         self.SwapBuffers()
 
@@ -612,22 +612,18 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def SetRange(self, rng):
         self.range.update(rng)
-        self.SetRangeZ(self.zrange)
+        #self.SetRangeZ(self.zrange)
         self.horzbar_buf.SetRange(self.range)
         self.vertbar_buf.SetRange(self.range)
         self.Resize()
+        self._UpdateDataSacleZ()
+        self.Invalidate()
 
     def GetRange(self):
         return self.range
 
-    def SetRangeZ(self, zrange):
-        # Set the range of the image values; otherwise it is calculated from
-        # the data itself. It will impact the color of each pixel. Instead of
-        # fully utilizing all the colors in color map, we may need to fix the
-        # color code for each value (e.g., 0 is always blue)
-        self.zrange = []
-        if len(zrange) == 2:
-            self.zrange = zrange
+    def _UpdateDataSacleZ(self):
+        if len(self.zrange) == 2:
             zmin, zmax = self.zrange
         elif self.raw_points:
             z = self.raw_points['z']
@@ -646,7 +642,16 @@ class SurfaceBase(glcanvas.GLCanvas):
             zscale = float(rng)/(zmax-zmin)
         self.SetDataScaleZ(zscale)
 
-        self.range.update({'zmin':zmin, 'zmax':zmax})
+    def SetRangeZ(self, zrange):
+        # Set the range of the image values; otherwise it is calculated from
+        # the data itself. It will impact the color of each pixel. Instead of
+        # fully utilizing all the colors in color map, we may need to fix the
+        # color code for each value (e.g., 0 is always blue)
+        self.zrange = []
+        if len(zrange) == 2:
+            self.zrange = zrange
+            self.SetRange({'zmin':zrange[0], 'zmax':zrange[1]})
+
 
     def SetHudText(self, txt):
         if txt != self.hudtext:
@@ -663,6 +668,11 @@ class SurfaceBase(glcanvas.GLCanvas):
             self.SetHudText('(%d, %d) %.4f'%(x, y, self.raw_points['z'][y, x]))
 
     def Invalidate(self, globject=True, color=True):
+        if not self.initialized:
+            # haven't been initialized yet, no need to do any processing. It
+            # will be done during the initialization.
+            return
+
         if color:
             self.Colorize()
         if globject:
@@ -1461,7 +1471,8 @@ class TrackingSurface(SurfaceBase):
 
     def SetRange(self, rng):
         super(TrackingSurface, self).SetRange(rng)
-        self.selected_buf.SetRange(rng)
+        if self.selected_buf:
+            self.selected_buf.SetRange(rng)
 
     def UpdateHudText(self):
         if self.frames is None or not self.frames.size:
