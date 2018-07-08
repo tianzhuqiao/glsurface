@@ -81,7 +81,7 @@ class SimpleBarBuf(object):
             return
         self.bar_color = clr[:]
         if self.buf_size > 0:
-            self.color = np.repeat(np.array([clr]), self.buf_size*4, axis=0)
+            self.color = np.repeat(np.array([clr]), self.buf_size*4, axis=0).flatten()
 
     def Resize(self, sz):
         self.buf_size = sz
@@ -102,7 +102,7 @@ class SimpleBarBuf(object):
             delta = (ymax-ymin)/sz
             self.vertex[:, 1] = (np.repeat(y, 4, axis=1) + [0, 0, delta, delta]).flatten()
 
-        self.SetColor(self.bar_color)
+        self.color = np.repeat(np.array([self.bar_color]), self.buf_size*4, axis=0).flatten()
         self.line = np.arange(sz*4)
 
     def GetGLObject(self):
