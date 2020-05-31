@@ -62,6 +62,7 @@ void main(void) {
 }
 """
 
+
 class SimpleBarBuf(object):
     def __init__(self, sz, rng, horz, clr=[0, 0.6, 0, 1]):
         self.horz = horz
@@ -81,12 +82,13 @@ class SimpleBarBuf(object):
             return
         self.bar_color = clr[:]
         if self.buf_size > 0:
-            self.color = np.repeat(np.array([clr]), self.buf_size*4, axis=0).flatten()
+            self.color = np.repeat(np.array([clr]), self.buf_size * 4,
+                                   axis=0).flatten()
 
     def Resize(self, sz):
         self.buf_size = sz
         zmax = self.range['zmax']
-        self.vertex = np.zeros((sz*4, 3))
+        self.vertex = np.zeros((sz * 4, 3))
         self.vertex[:, 2].fill(zmax)
         if self.horz:
             # for point d[i], draw lines between points:
@@ -94,16 +96,20 @@ class SimpleBarBuf(object):
             # see update() for detail
             xmax, xmin = self.range['xmax'], self.range['xmin']
             x = np.linspace(xmin, xmax, sz, endpoint=False).reshape((sz, 1))
-            delta = (xmax-xmin)/sz
-            self.vertex[:, 0] = (np.repeat(x, 4, axis=1) + [0, 0, delta, delta]).flatten()
+            delta = (xmax - xmin) / sz
+            self.vertex[:, 0] = (np.repeat(x, 4, axis=1) +
+                                 [0, 0, delta, delta]).flatten()
         else:
             ymax, ymin = self.range['ymax'], self.range['ymin']
             y = np.linspace(ymin, ymax, sz, endpoint=False).reshape((sz, 1))
-            delta = (ymax-ymin)/sz
-            self.vertex[:, 1] = (np.repeat(y, 4, axis=1) + [0, 0, delta, delta]).flatten()
+            delta = (ymax - ymin) / sz
+            self.vertex[:, 1] = (np.repeat(y, 4, axis=1) +
+                                 [0, 0, delta, delta]).flatten()
 
-        self.color = np.repeat(np.array([self.bar_color]), self.buf_size*4, axis=0).flatten()
-        self.line = np.arange(sz*4)
+        self.color = np.repeat(np.array([self.bar_color]),
+                               self.buf_size * 4,
+                               axis=0).flatten()
+        self.line = np.arange(sz * 4)
 
     def GetGLObject(self):
         return self.vertex.flatten(), self.color, self.line
@@ -114,10 +120,11 @@ class SimpleBarBuf(object):
         zmax = self.range['zmax']
         if self.horz:
             ymax, ymin = self.range['ymax'], self.range['ymin']
-            self.vertex[:, 1] = ymax-(np.kron(d, [0, 1, 1, 0])).flatten()
+            self.vertex[:, 1] = ymax - (np.kron(d, [0, 1, 1, 0])).flatten()
         else:
             xmax, xmin = self.range['xmax'], self.range['xmin']
-            self.vertex[:, 0] = xmax-(np.kron(d, [0, 1, 1, 0])).flatten()
+            self.vertex[:, 0] = xmax - (np.kron(d, [0, 1, 1, 0])).flatten()
+
 
 class SurfaceBase(glcanvas.GLCanvas):
     ID_SHOW_2D = wx.NewId()
@@ -136,8 +143,10 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def __init__(self, parent, points=None):
         # set the depth size, otherwise the depth test may not work correctly.
-        attribs = [glcanvas.WX_GL_RGBA, glcanvas.WX_GL_DOUBLEBUFFER,
-                   glcanvas.WX_GL_DEPTH_SIZE, 16]
+        attribs = [
+            glcanvas.WX_GL_RGBA, glcanvas.WX_GL_DOUBLEBUFFER,
+            glcanvas.WX_GL_DEPTH_SIZE, 16
+        ]
         glcanvas.GLCanvas.__init__(self, parent, -1, attribList=attribs)
         self.context = glcanvas.GLContext(self)
 
@@ -145,36 +154,49 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.drag_end = wx.Point(0, 0)
         self.points = []
         self.pointsClr = []
-        self.dimension = {'x':0, 'y':0}
+        self.dimension = {'x': 0, 'y': 0}
         self.is_mouse_down = False
         self.is_dragging = False
-        self.rotation = {'x':110, 'y':0, 'z':110}
+        self.rotation = {'x': 110, 'y': 0, 'z': 110}
         self.default_rotate = 0
         sz = self.GetClientSize()
         self.W = sz.x
         self.H = sz.y
-        self.range = {'xmin':0, 'ymin':0, 'zmin':0, 'xmax':0, 'ymax':0, 'zmax':1}
+        self.range = {
+            'xmin': 0,
+            'ymin': 0,
+            'zmin': 0,
+            'xmax': 0,
+            'ymax': 0,
+            'zmax': 1
+        }
         self.zrange = []
-        self.scale = {'base':1, 'zoom':1}
+        self.scale = {'base': 1, 'zoom': 1}
         self.rotate_delta = 0.05
-        self.margin = {'top':50, 'bottom':10, 'left':1, 'right':1}
-        self.offset = {'base':{'x':0, 'y':0}, 'user':{'x':0, 'y':0}}
-        self.data_offset = {'x':0, 'y':0, 'z':0}
-        self.selected = {'x':0, 'y':0, 'clr':[1, 0, 1, 1]}
+        self.margin = {'top': 50, 'bottom': 10, 'left': 1, 'right': 1}
+        self.offset = {'base': {'x': 0, 'y': 0}, 'user': {'x': 0, 'y': 0}}
+        self.data_offset = {'x': 0, 'y': 0, 'z': 0}
+        self.selected = {'x': 0, 'y': 0, 'clr': [1, 0, 1, 1]}
         self.color_scale = []
         self.blocks = []
         self.data_zscale = 1
         # 2d mode is the fast-drawing mode, only shows the 2D image
         self.mode_2d = False
-        self.show = {'surface': True, 'mesh': False, 'contour': False,
-                     'box':False, 'axis':False, 'horz_bar': False,
-                     'vert_bar': False}
+        self.show = {
+            'surface': True,
+            'mesh': False,
+            'contour': False,
+            'box': False,
+            'axis': False,
+            'horz_bar': False,
+            'vert_bar': False
+        }
         self.show_step_surface = True
         self.contour_levels = 100
         self.rotate_matrix = np.eye(3, dtype=np.float32)
-        self.color_map = np.array([[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1],
-                                   [0, 1, 0, 1], [1, 1, 0, 1], [1, 0.5, 0, 1],
-                                   [1, 0, 0, 1]], np.float32)
+        self.color_map = np.array(
+            [[0, 0, 0, 1], [0, 0, 1, 1], [0, 1, 1, 1], [0, 1, 0, 1],
+             [1, 1, 0, 1], [1, 0.5, 0, 1], [1, 0, 0, 1]], np.float32)
         self.initialized = False
         self.raw_points = points
         self.globjects = {}
@@ -210,14 +232,15 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenu)
 
     def GetAccelList(self):
-        accel_tbl = [(wx.ACCEL_SHIFT, ord('S'), self.ID_SHOW_TRIANGLE),
-                     (wx.ACCEL_SHIFT, ord('H'), self.ID_SHOW_HORZ_BAR),
-                     (wx.ACCEL_SHIFT, ord('V'), self.ID_SHOW_VERT_BAR),
-                    ]
+        accel_tbl = [
+            (wx.ACCEL_SHIFT, ord('S'), self.ID_SHOW_TRIANGLE),
+            (wx.ACCEL_SHIFT, ord('H'), self.ID_SHOW_HORZ_BAR),
+            (wx.ACCEL_SHIFT, ord('V'), self.ID_SHOW_VERT_BAR),
+        ]
         return accel_tbl
 
     def OnEraseBackground(self, event):
-        pass # Do nothing, to avoid flashing on MSW.
+        pass  # Do nothing, to avoid flashing on MSW.
 
     def OnContextMenu(self, event):
         menu = self.GetContextMenu()
@@ -229,23 +252,30 @@ class SurfaceBase(glcanvas.GLCanvas):
         elements = wx.Menu()
         elements.Append(self.ID_SHOW_2D, 'Show 2D Mode', '', wx.ITEM_CHECK)
         elements.AppendSeparator()
-        elements.Append(self.ID_SHOW_STEP_SURFACE, 'Step Surface', '', wx.ITEM_CHECK)
-        elements.Append(self.ID_SHOW_TRIANGLE, 'Show Surface\tshift+s', '', wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_STEP_SURFACE, 'Step Surface', '',
+                        wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_TRIANGLE, 'Show Surface\tshift+s', '',
+                        wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_MESH, 'Show Mesh', '', wx.ITEM_CHECK)
         elements.AppendSeparator()
-        elements.Append(self.ID_SHOW_CONTOUR, 'Show Contour', '', wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_CONTOUR, 'Show Contour', '',
+                        wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_BOX, 'Show Box', '', wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_AXIS, 'Show Axis', '', wx.ITEM_CHECK)
         elements.AppendSeparator()
-        elements.Append(self.ID_SHOW_HORZ_BAR, 'Show Horz Bar\tshift+h', '', wx.ITEM_CHECK)
-        elements.Append(self.ID_SHOW_VERT_BAR, 'Show Vert Bar\tshift+v', '', wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_HORZ_BAR, 'Show Horz Bar\tshift+h', '',
+                        wx.ITEM_CHECK)
+        elements.Append(self.ID_SHOW_VERT_BAR, 'Show Vert Bar\tshift+v', '',
+                        wx.ITEM_CHECK)
         menu.AppendSeparator()
         menu.AppendSubMenu(elements, 'Elements')
         rotate = wx.Menu()
         rotate.Append(self.ID_ROTATE_0, 'Rotate 0 degree', '', wx.ITEM_CHECK)
         rotate.Append(self.ID_ROTATE_90, 'Rotate 90 degree', '', wx.ITEM_CHECK)
-        rotate.Append(self.ID_ROTATE_180, 'Rotate 180 degree', '', wx.ITEM_CHECK)
-        rotate.Append(self.ID_ROTATE_270, 'Rotate 270 degree', '', wx.ITEM_CHECK)
+        rotate.Append(self.ID_ROTATE_180, 'Rotate 180 degree', '',
+                      wx.ITEM_CHECK)
+        rotate.Append(self.ID_ROTATE_270, 'Rotate 270 degree', '',
+                      wx.ITEM_CHECK)
         menu.AppendSeparator()
         menu.AppendSubMenu(rotate, 'Orientation')
         return menu
@@ -358,7 +388,8 @@ class SurfaceBase(glcanvas.GLCanvas):
             event.Check(self.default_rotate == 270)
 
     def SetMargin(self, left=None, right=None, top=None, bottom=None):
-        for m in zip([left, right, top, bottom], ['left', 'right', 'top', 'bottom']):
+        for m in zip([left, right, top, bottom],
+                     ['left', 'right', 'top', 'bottom']):
             if m[0] is not None:
                 self.margin[m[1]] = m[0]
 
@@ -374,11 +405,15 @@ class SurfaceBase(glcanvas.GLCanvas):
         ymax, ymin = self.range['ymax'], self.range['ymin']
         if self.default_rotate in [90, 270]:
             xmax, xmin, ymax, ymin = ymax, ymin, xmax, xmin
-        if xmax-xmin > 0 and ymax-ymin >= 0:
+        if xmax - xmin > 0 and ymax - ymin >= 0:
             t, b = self.margin['top'], self.margin['bottom']
             l, r = self.margin['left'], self.margin['right']
-            self.scale['base'] = min((self.W-l-r)/(xmax-xmin), (self.H-t-b)/(ymax-ymin))
-            self.offset['base'] = {'x': self.W/2 + (l-r)/2, 'y': self.H/2 + (t-b)/2}
+            self.scale['base'] = min((self.W - l - r) / (xmax - xmin),
+                                     (self.H - t - b) / (ymax - ymin))
+            self.offset['base'] = {
+                'x': self.W / 2 + (l - r) / 2,
+                'y': self.H / 2 + (t - b) / 2
+            }
 
     def OnSize(self, event):
         # update the size
@@ -404,9 +439,9 @@ class SurfaceBase(glcanvas.GLCanvas):
     def InitGL(self):
         self.SetCurrent(self.context)
 
-        glClearColor(1.0, 1.0, 1.0, 1.0) # this is the color
-        glEnable(GL_DEPTH_TEST) # Enable Depth Testing
-        glDepthFunc(GL_LEQUAL) # Set Perspective View
+        glClearColor(1.0, 1.0, 1.0, 1.0)  # this is the color
+        glEnable(GL_DEPTH_TEST)  # Enable Depth Testing
+        glDepthFunc(GL_LEQUAL)  # Set Perspective View
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glEnable(GL_BLEND)
 
@@ -434,14 +469,16 @@ class SurfaceBase(glcanvas.GLCanvas):
         glLinkProgram(self.ShaderProgram)
         glUseProgram(self.ShaderProgram)
         #Link Vertex Position Attribute from Shader
-        self.VertexPosition = glGetAttribLocation(self.ShaderProgram, "VertexPosition")
+        self.VertexPosition = glGetAttribLocation(self.ShaderProgram,
+                                                  "VertexPosition")
         glEnableVertexAttribArray(self.VertexPosition)
-        self.VertexColor = glGetAttribLocation(self.ShaderProgram, "VertexColor")
+        self.VertexColor = glGetAttribLocation(self.ShaderProgram,
+                                               "VertexColor")
         glEnableVertexAttribArray(self.VertexColor)
         glViewport(0, 0, self.W, self.H)
         # generate the buffer
         self.glBufs = glGenBuffers(3)
-        self.glTextures = glGenTextures(3) # axis, hud, 2d image
+        self.glTextures = glGenTextures(3)  # axis, hud, 2d image
 
     def OnKeyDown(self, event):
         if event.ShiftDown():
@@ -497,22 +534,22 @@ class SurfaceBase(glcanvas.GLCanvas):
                 dx, dy = -dx, -dy
             elif self.default_rotate == 270:
                 dx, dy = -dy, dx
-            y = (y+dy)%my
-            x = (x+dx)%mx
-            self.SetSelected({'x': x, 'y':y})
+            y = (y + dy) % my
+            x = (x + dx) % mx
+            self.SetSelected({'x': x, 'y': y})
 
     def OnMouseDown(self, event):
         bRect = self.GetClientRect()
         pos = event.GetPosition()
-        self.drag_start.x = (pos.x - bRect.left)#*(self.W/bRect.width)
-        self.drag_start.y = (pos.y - bRect.top)#*(self.H/bRect.height)
+        self.drag_start.x = (pos.x - bRect.left)  #*(self.W/bRect.width)
+        self.drag_start.y = (pos.y - bRect.top)  #*(self.H/bRect.height)
         self.is_mouse_down = True
 
     def OnMouseMotion(self, event):
         bRect = self.GetClientRect()
         pos = event.GetPosition()
-        self.drag_end.x = (pos.x - bRect.left)#*((self.W)/bRect.width)
-        self.drag_end.y = (pos.y - bRect.top)#*((self.H)/bRect.height)
+        self.drag_end.x = (pos.x - bRect.left)  #*((self.W)/bRect.width)
+        self.drag_end.y = (pos.y - bRect.top)  #*((self.H)/bRect.height)
         if self.is_mouse_down:
             if event.CmdDown():
                 # when ctrl is down, move the image with mouse
@@ -527,8 +564,8 @@ class SurfaceBase(glcanvas.GLCanvas):
                    abs(self.drag_start.y-self.drag_end.y) > 1:
                     self.is_dragging = True
                 if self.is_dragging:
-                    self.Rotate(-(self.drag_end.y-self.drag_start.y),
-                                (self.drag_end.x-self.drag_start.x), 0)
+                    self.Rotate(-(self.drag_end.y - self.drag_start.y),
+                                (self.drag_end.x - self.drag_start.x), 0)
                 self.drag_start.x = self.drag_end.x
                 self.drag_start.y = self.drag_end.y
 
@@ -542,48 +579,50 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.Refresh()
 
     def OnMouseWheel(self, event):
-        delta = (event.GetWheelRotation() > 0)*2-1
+        delta = (event.GetWheelRotation() > 0) * 2 - 1
         bRect = self.GetClientRect()
         pos = event.GetPosition()
-        x = (pos.x-bRect.left)*((self.W)/bRect.width)
-        y = (pos.y-bRect.top)*((self.H)/bRect.height)
+        x = (pos.x - bRect.left) * ((self.W) / bRect.width)
+        y = (pos.y - bRect.top) * ((self.H) / bRect.height)
         if delta:
             zoom = 1.1**delta
             self.scale['zoom'] *= zoom
             base = self.offset['base']
             user = self.offset['user']
-            user['x'] = x - (x-base['x']-user['x'])*zoom - base['x']
-            user['y'] = y - (y-base['y']-user['y'])*zoom - base['y']
+            user['x'] = x - (x - base['x'] - user['x']) * zoom - base['x']
+            user['y'] = y - (y - base['y'] - user['y']) * zoom - base['y']
             self.Refresh()
 
     def ResetRotate(self):
         # reset rotation, zoom, offset
-        self.rotation = {'x':0, 'y':0, 'z':0}
+        self.rotation = {'x': 0, 'y': 0, 'z': 0}
         self.rotate_matrix = np.eye(3, dtype=np.float32)
         self.scale['zoom'] = 1
-        self.offset['user'] = {'x':0, 'y':0}
+        self.offset['user'] = {'x': 0, 'y': 0}
         # set the default orientation
-        self.Rotate(0, 0, self.default_rotate/180.*np.pi/self.rotate_delta)
+        self.Rotate(0, 0,
+                    self.default_rotate / 180. * np.pi / self.rotate_delta)
 
     def GetColorByZ(self, z):
         zMin = self.range['zmin']
         zMax = self.range['zmax']
         scale = self.data_zscale
-        if zMax-zMin > 0:
-            scale = 1/(zMax-zMin)
+        if zMax - zMin > 0:
+            scale = 1 / (zMax - zMin)
         offset = 0
         if len(self.color_scale) == 2:
             scale = self.color_scale[0]
             offset = self.color_scale[1]
 
         C = self.color_map
-        norm_p = (z - zMin)*scale + offset
-        norm_p = norm_p*len(self.color_map)
-        norm_p = np.clip(norm_p, 0, len(self.color_map)-1)
+        norm_p = (z - zMin) * scale + offset
+        norm_p = norm_p * len(self.color_map)
+        norm_p = np.clip(norm_p, 0, len(self.color_map) - 1)
         norm_p_l = np.floor(norm_p).astype(int)
         norm_p_r = np.ceil(norm_p).astype(int)
         norm_p_d = norm_p - norm_p_l
-        return C[norm_p_l, :] + (((C[norm_p_r, :] - C[norm_p_l, :]).T)*norm_p_d).T
+        return C[norm_p_l, :] + ((
+            (C[norm_p_r, :] - C[norm_p_l, :]).T) * norm_p_d).T
 
     def Colorize(self):
         self.pointsClr = self.GetColorByZ(self.points[:, 2])
@@ -630,16 +669,16 @@ class SurfaceBase(glcanvas.GLCanvas):
             zmin, zmax = np.min(z), np.max(z)
         else:
             zmin, zmax = 0, 1
-        self.data_offset['z'] = (zmax+zmin)/2
+        self.data_offset['z'] = (zmax + zmin) / 2
         xmax, xmin = self.range['xmax'], self.range['xmin']
         ymax, ymin = self.range['ymax'], self.range['ymin']
-        rng = max(ymax - ymin, xmax- xmin)
+        rng = max(ymax - ymin, xmax - xmin)
         # scale the z data, such that it has similar span as x or y axis.
         # otherwise, when rotate the image, the projection of z on x or y axis
         # will not look good (e.g., too small or too large).
         zscale = 1
-        if zmax-zmin > 0 and rng > 0:
-            zscale = float(rng)/(zmax-zmin)
+        if zmax - zmin > 0 and rng > 0:
+            zscale = float(rng) / (zmax - zmin)
         self.SetDataScaleZ(zscale)
 
     def SetRangeZ(self, zrange):
@@ -650,8 +689,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.zrange = []
         if len(zrange) == 2:
             self.zrange = zrange
-            self.SetRange({'zmin':zrange[0], 'zmax':zrange[1]})
-
+            self.SetRange({'zmin': zrange[0], 'zmax': zrange[1]})
 
     def SetHudText(self, txt):
         if txt != self.hudtext:
@@ -665,7 +703,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         x, y = self.selected['x'], self.selected['y']
         r, c = self.raw_points['z'].shape
         if x >= 0 and y >= 0 and x < c and y < r:
-            self.SetHudText('(%d, %d) %.4f'%(x, y, self.raw_points['z'][y, x]))
+            self.SetHudText('(%d, %d) %.4f' %
+                            (x, y, self.raw_points['z'][y, x]))
 
     def Invalidate(self, globject=True, color=True):
         if not self.initialized:
@@ -722,12 +761,17 @@ class SurfaceBase(glcanvas.GLCanvas):
     def SetDimension(self, rows, cols):
         # 'x', 'y' is used in 3D mode, where the image is expanded 1 pixel on
         # each dimension
-        self.dimension = {'y': rows+1, 'x': cols+1, 'rows': rows, 'cols': cols}
+        self.dimension = {
+            'y': rows + 1,
+            'x': cols + 1,
+            'rows': rows,
+            'cols': cols
+        }
         # resize the horz/vert bar buffer
         self.horzbar_buf.Resize(cols)
         self.vertbar_buf.Resize(rows)
         # resize the image buffer
-        self.Pz = np.zeros((rows+1, cols+1))
+        self.Pz = np.zeros((rows + 1, cols + 1))
         self.points = np.zeros((self.Pz.size, 3))
 
     def GetDimension(self):
@@ -745,16 +789,16 @@ class SurfaceBase(glcanvas.GLCanvas):
         # the surface is draw as a quad defined by
         # (x(i) y(i), z(i)), (x(i+1) y(i), z(i))
         # (x(i) y(i+1), z(i)), (x(i+1) y(i+1), z(i))
-        xy = np.meshgrid(np.arange(0, cols+1), np.arange(0, rows+1))
+        xy = np.meshgrid(np.arange(0, cols + 1), np.arange(0, rows + 1))
         # if 'x' data is not defined, assume it is [0:cols]
         if 'x' not in points:
             Px = xy[0]
         else:
-            Px = np.zeros((rows+1, cols+1))
+            Px = np.zeros((rows + 1, cols + 1))
             Px[0:rows, 0:cols] = points['x']
             Px[-1, :] = Px[-2, :]
             if cols > 1:
-                Px[:, -1] = Px[:, -2]*2 - Px[:, -3]
+                Px[:, -1] = Px[:, -2] * 2 - Px[:, -3]
             else:
                 Px[:, -1] = Px[:, -2] + 1
 
@@ -762,11 +806,11 @@ class SurfaceBase(glcanvas.GLCanvas):
         if 'y' not in points:
             Py = xy[1]
         else:
-            Py = np.zeros((rows+1, cols+1))
+            Py = np.zeros((rows + 1, cols + 1))
             Py[0:rows, 0:cols] = points['y']
             Py[:, -1] = Py[:, -2]
             if rows > 1:
-                Py[-1, :] = Py[-2, :]*2 - Py[-3, :]
+                Py[-1, :] = Py[-2, :] * 2 - Py[-3, :]
             else:
                 Py[-1, :] = Py[-2, :] + 1
 
@@ -777,16 +821,22 @@ class SurfaceBase(glcanvas.GLCanvas):
         xmax, ymax, zmax = np.max(Px), np.max(Py), np.max(self.Pz)
         if self.zrange:
             zmin, zmax = self.zrange
-        self.data_offset['x'] = (xmax+xmin)/2
-        self.data_offset['y'] = (ymax+ymin)/2
-        self.data_offset['z'] = (zmax+zmin)/2
+        self.data_offset['x'] = (xmax + xmin) / 2
+        self.data_offset['y'] = (ymax + ymin) / 2
+        self.data_offset['z'] = (zmax + zmin) / 2
 
         self.points = np.zeros((self.Pz.size, 3))
         self.points[:, 0] = Px.T.flatten()
         self.points[:, 1] = Py.T.flatten()
         self.points[:, 2] = self.Pz.T.flatten()
-        self.SetRange({'xmin':xmin, 'ymin':ymin, 'zmin':zmin,
-                       'xmax':xmax, 'ymax':ymax, 'zmax':zmax})
+        self.SetRange({
+            'xmin': xmin,
+            'ymin': ymin,
+            'zmin': zmin,
+            'xmax': xmax,
+            'ymax': ymax,
+            'zmax': zmax
+        })
 
         self.UpdateHudText()
         self.Invalidate()
@@ -803,12 +853,12 @@ class SurfaceBase(glcanvas.GLCanvas):
             # do nothing
             pass
         elif v[0][2] < level and v[1][2] > level:
-            p1 = (v[0]-v[1])/(v[0][2]-v[1][2])*(level-v[0][2])+v[0]
-            p2 = (v[0]-v[2])/(v[0][2]-v[2][2])*(level-v[0][2])+v[0]
+            p1 = (v[0] - v[1]) / (v[0][2] - v[1][2]) * (level - v[0][2]) + v[0]
+            p2 = (v[0] - v[2]) / (v[0][2] - v[2][2]) * (level - v[0][2]) + v[0]
             valid = True
         elif v[1][2] < level and v[2][2] > level:
-            p1 = (v[2]-v[0])/(v[2][2]-v[0][2])*(level-v[2][2])+v[2]
-            p2 = (v[2]-v[1])/(v[2][2]-v[1][2])*(level-v[2][2])+v[2]
+            p1 = (v[2] - v[0]) / (v[2][2] - v[0][2]) * (level - v[2][2]) + v[2]
+            p2 = (v[2] - v[1]) / (v[2][2] - v[1][2]) * (level - v[2][2]) + v[2]
             valid = True
         elif v[0][2] == level and v[1][2] == level:
             p1 = v[0]
@@ -819,18 +869,21 @@ class SurfaceBase(glcanvas.GLCanvas):
             p2 = v[2]
             valid = True
 
-        return {'valid':valid, 'p1':p1, 'p2':p2}
+        return {'valid': valid, 'p1': p1, 'p2': p2}
 
     def PrepareContour(self, L, R):
         xmin, xmax = self.range['xmin'], self.range['xmax']
         ymin, ymax = self.range['ymin'], self.range['ymax']
         zmin, zmax = self.range['zmin'], self.range['zmax']
         # ugly, offset the contour to make it 'align' with mesh and quad
-        ox = (xmax-xmin)/(self.dimension['x']-1)/2
-        oy = (ymax-ymin)/(self.dimension['y']-1)/2
+        ox = (xmax - xmin) / (self.dimension['x'] - 1) / 2
+        oy = (ymax - ymin) / (self.dimension['y'] - 1) / 2
         oz = 0
         # calculate the contour levels uniformly, ignore endpoints (zmin, zmax)
-        levels = np.linspace(zmin, zmax, self.contour_levels+1, endpoint=False)[1:]
+        levels = np.linspace(zmin,
+                             zmax,
+                             self.contour_levels + 1,
+                             endpoint=False)[1:]
         my = self.dimension['y']
         P = self.points
         vertexAll = []
@@ -842,31 +895,31 @@ class SurfaceBase(glcanvas.GLCanvas):
         colour = []
         minmax = []
         for i in range(L, R):
-            if i%my == my-1 or i+my+1 >= len(P):
+            if i % my == my - 1 or i + my + 1 >= len(P):
                 minmax.append([0, 0])
                 continue
-            t1 = min(P[i][2], P[i+1][2], P[i+my][2], P[i+my+1][2])
-            t2 = max(P[i][2], P[i+1][2], P[i+my][2], P[i+my+1][2])
+            t1 = min(P[i][2], P[i + 1][2], P[i + my][2], P[i + my + 1][2])
+            t2 = max(P[i][2], P[i + 1][2], P[i + my][2], P[i + my + 1][2])
             minmax.append([t1, t2])
 
         for level in levels:
             clr = self.GetColorByZ(level)
             clr = [clr[0], clr[1], clr[2], 1]
             for i in range(L, R):
-                if i%my == my-1 or i+my+1 >= len(P):
+                if i % my == my - 1 or i + my + 1 >= len(P):
                     # the contour is calculate with for points
                     # i   i+my
                     # i+1 i+my+1
                     # so ignore the bottom and right edges
                     continue
-                if minmax[i-L][0] > level or minmax[i-L][1] < level:
+                if minmax[i - L][0] > level or minmax[i - L][1] < level:
                     # the current level is not cross ith point and its 3
                     # neighbours, do nothing
                     continue
-                if len(vertex) > 2**16-10:
+                if len(vertex) > 2**16 - 10:
                     # too many vertex, add to separate block to avoid overflow
                     # when rendering
-                    vertex = (np.array(vertex)+[ox, oy, oz]).flatten()
+                    vertex = (np.array(vertex) + [ox, oy, oz]).flatten()
                     colour = np.array(colour).flatten()
                     vertexAll.append(vertex)
                     meshAll.append(mesh)
@@ -874,27 +927,27 @@ class SurfaceBase(glcanvas.GLCanvas):
                     vertex = []
                     mesh = []
                     colour = []
-                v = np.array([P[i], P[i+1], P[i+my+1]])
+                v = np.array([P[i], P[i + 1], P[i + my + 1]])
                 p = self.CalcContour(v, level)
                 if p['valid']:
                     vertex.append(p['p1'])
-                    mesh.append(len(vertex)-1)
+                    mesh.append(len(vertex) - 1)
                     vertex.append(p['p2'])
-                    mesh.append(len(vertex)-1)
+                    mesh.append(len(vertex) - 1)
                     colour.append(clr)
                     colour.append(clr)
 
-                v = np.array([P[i], P[i+my], P[i+my+1]])
+                v = np.array([P[i], P[i + my], P[i + my + 1]])
                 p = self.CalcContour(v, level)
                 if p['valid']:
                     vertex.append(p['p1'])
-                    mesh.append(len(vertex)-1)
+                    mesh.append(len(vertex) - 1)
                     vertex.append(p['p2'])
-                    mesh.append(len(vertex)-1)
+                    mesh.append(len(vertex) - 1)
                     colour.append(clr)
                     colour.append(clr)
         if vertex:
-            vertex = (np.array(vertex)+[ox, oy, oz]).flatten()
+            vertex = (np.array(vertex) + [ox, oy, oz]).flatten()
             colour = np.array(colour).flatten()
             mesh = np.array(mesh).flatten()
             vertexAll.append(vertex)
@@ -908,18 +961,21 @@ class SurfaceBase(glcanvas.GLCanvas):
         triangleAll = []
         meshAll = []
         contourAll = []
-        block = int(len(self.points)*4/(2**16)+1)
+        block = int(len(self.points) * 4 / (2**16) + 1)
         my = self.dimension['y']
         mx = self.dimension['x']
         # the index of each block
-        blocks = np.linspace(0, len(self.points), block+1, dtype=int)
+        blocks = np.linspace(0, len(self.points), block + 1, dtype=int)
         self.blocks = blocks
         r = blocks[0]
         l = 0
         P = self.points
         for k in range(1, len(blocks)):
             l, r = r, blocks[k]
-            acolor = np.repeat(self.pointsClr[np.arange(l, min(r+my+1, len(P)))], 4, axis=0)
+            acolor = np.repeat(self.pointsClr[np.arange(
+                l, min(r + my + 1, len(P)))],
+                               4,
+                               axis=0)
             # for each point (x[i], y[j], z[i,j]), construct a quad
             # when show_step_surface is true
             # (x[i],   y[i],   z[i,j])
@@ -932,9 +988,9 @@ class SurfaceBase(glcanvas.GLCanvas):
             # (x[i+1], y[i+1], z[i,j])
             # (x[i],   y[i+1], z[i,j])
 
-            avertex = np.zeros(((min(r+my+1, len(P)) - l)*4, 3))
+            avertex = np.zeros(((min(r + my + 1, len(P)) - l) * 4, 3))
             # the index
-            idx = np.arange(l, min(r+my+1, len(P)))
+            idx = np.arange(l, min(r + my + 1, len(P)))
             idx = np.matrix(idx).T
             idx = np.repeat(idx, 4, axis=1)
             # the corresponding row & col
@@ -942,74 +998,77 @@ class SurfaceBase(glcanvas.GLCanvas):
             #cc = (idx/my).astype(int)
             # the row for each 4 points in the same quad
             rr = rr + [0, 1, 1, 0]
-            rr = rr.flatten().clip(0, my-1)
+            rr = rr.flatten().clip(0, my - 1)
             # the col for each 4 points in the same quad
             cc = cc + [0, 0, 1, 1]
-            cc = cc.flatten().clip(0, mx-1)
+            cc = cc.flatten().clip(0, mx - 1)
             # update the vertex of each quad
-            avertex[:, 0] = P[(cc*my + rr), 0]
-            avertex[:, 1] = P[(cc*my + rr), 1]
+            avertex[:, 0] = P[(cc * my + rr), 0]
+            avertex[:, 1] = P[(cc * my + rr), 1]
             if self.show_step_surface:
                 # x, y
-                avertex[:, 0:-1] = P[(cc*my + rr), 0:-1]
+                avertex[:, 0:-1] = P[(cc * my + rr), 0:-1]
                 # the quad use the same z value of (i, j)
                 avertex[:, 2] = P[idx.flatten(), 2]
             else:
-                avertex[:, :] = P[(cc*my + rr), :]
+                avertex[:, :] = P[(cc * my + rr), :]
 
             # index for quad and mesh
-            idx = np.arange(0, r-l)
+            idx = np.arange(0, r - l)
             idx = np.matrix(idx).T
             idx = np.repeat(idx, 4, axis=1)
             COLS, ROWS = np.divmod(idx, my)
-            idx = idx*4
+            idx = idx * 4
 
             # quad
-            triangle = np.zeros(((r-l)*3, 4))
+            triangle = np.zeros(((r - l) * 3, 4))
             # the current quad
             # triangle.append([4*i, 4*i+1, 4*i+2, 4*i+3])
-            triangle[0:r-l, :] = idx + [0, 1, 2, 3]
+            triangle[0:r - l, :] = idx + [0, 1, 2, 3]
 
             # connect to the quad right
             # triangle.append([4*i+3, 4*i+2, 4*(i+my)+1, 4*(i+my)])
-            rr = ROWS #+ [0, 0, 0, 0]
+            rr = ROWS  #+ [0, 0, 0, 0]
             #rr = rr.clip(0, my-1)
             cc = COLS + [0, 0, 1, 1]
-            cc = cc.clip(0, mx-1)
-            triangle[r-l:2*(r-l), :] = (cc*my + rr)*4 + [3, 2, 1, 0]
+            cc = cc.clip(0, mx - 1)
+            triangle[r - l:2 * (r - l), :] = (cc * my + rr) * 4 + [3, 2, 1, 0]
 
             # connect to the quad below
             # triangle.append([4*i+1, 4*(i+1), 4*(i+1)+3, 4*(i)+2])
             rr = ROWS + [0, 1, 1, 0]
-            rr = rr.clip(0, my-1)
-            cc = COLS #+ [0, 0, 0, 0]
+            rr = rr.clip(0, my - 1)
+            cc = COLS  #+ [0, 0, 0, 0]
             #cc = cc.clip(0, mx-1)
-            triangle[2*(r-l):3*(r-l), :] = (cc*my + rr)*4 + [1, 0, 3, 2]
+            triangle[2 * (r - l):3 *
+                     (r - l), :] = (cc * my + rr) * 4 + [1, 0, 3, 2]
 
             # mesh
             mesh = None
             if self.show['mesh']:
-                mesh = np.zeros(((r-l)*4, 4))
+                mesh = np.zeros(((r - l) * 4, 4))
                 # mesh in the same quad
                 # mesh.append([4*i, 4*i+1, 4*i+1, 4*i+2, 4*i+2, 4*i+3, 4*i+3, 4*i])
-                mesh[0*(r-l):1*r-l] = idx + [0, 1, 1, 2]
-                mesh[1*(r-l):2*r-l] = idx + [2, 3, 3, 0]
+                mesh[0 * (r - l):1 * r - l] = idx + [0, 1, 1, 2]
+                mesh[1 * (r - l):2 * r - l] = idx + [2, 3, 3, 0]
 
                 # connect to the quad right
                 # mesh.append([4*i+3, 4*(i+my), 4*i+2, 4*(i+my)+1])
-                rr = ROWS #+ [0, 0, 0, 0]
+                rr = ROWS  #+ [0, 0, 0, 0]
                 #rr = rr.clip(0, my-1)
                 cc = COLS + [0, 1, 0, 1]
-                cc = cc.clip(0, mx-1)
-                mesh[2*(r-l):3*(r-l), :] = (cc*my + rr)*4 + [3, 0, 2, 1]
+                cc = cc.clip(0, mx - 1)
+                mesh[2 * (r - l):3 *
+                     (r - l), :] = (cc * my + rr) * 4 + [3, 0, 2, 1]
 
                 # connect to the quad below
                 # mesh.append([4*i+1, 4*(i+1), 4*i+2, 4*(i+1)+3])
                 rr = ROWS + [0, 1, 0, 1]
-                rr = rr.clip(0, my-1)
-                cc = COLS #+ [0, 0, 0, 0]
+                rr = rr.clip(0, my - 1)
+                cc = COLS  #+ [0, 0, 0, 0]
                 #cc = cc.clip(0, mx-1)
-                mesh[3*(r-l):4*(r-l), :] = (cc*my + rr)*4 + [1, 0, 2, 3]
+                mesh[3 * (r - l):4 *
+                     (r - l), :] = (cc * my + rr) * 4 + [1, 0, 2, 3]
 
                 mesh = mesh.flatten()
             contour = None
@@ -1023,8 +1082,14 @@ class SurfaceBase(glcanvas.GLCanvas):
             triangleAll.append(triangle)
             meshAll.append(mesh)
             contourAll.append(contour)
-        return {'block':block, 'Color':colorAll, 'Vertices':vertexAll,
-                'Trinagles':triangleAll, 'Mesh':meshAll, 'Contour':contourAll}
+        return {
+            'block': block,
+            'Color': colorAll,
+            'Vertices': vertexAll,
+            'Trinagles': triangleAll,
+            'Mesh': meshAll,
+            'Contour': contourAll
+        }
 
     def SetGLBuffer(self, v, c):
         # vertex buffer
@@ -1032,7 +1097,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         glBindBuffer(GL_ARRAY_BUFFER, self.glBufs[0])
         # Fill it With the Data
         glBufferData(GL_ARRAY_BUFFER, v.astype(np.float32), GL_STATIC_DRAW)
-        glVertexAttribPointer(self.VertexPosition, 3, GL_FLOAT, GL_FALSE, 0, None)
+        glVertexAttribPointer(self.VertexPosition, 3, GL_FLOAT, GL_FALSE, 0,
+                              None)
 
         # color buffer
         glBindBuffer(GL_ARRAY_BUFFER, self.glBufs[1])
@@ -1041,43 +1107,39 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def DrawElement(self, t, v, m, o=0):
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, self.glBufs[2])
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, v.astype(np.uint16), GL_STATIC_DRAW)
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, v.astype(np.uint16),
+                     GL_STATIC_DRAW)
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "mesh"), m)
-        glUniform1i(glGetUniformLocation(self.ShaderProgram, "VertexOriginal"), o)
+        glUniform1i(glGetUniformLocation(self.ShaderProgram, "VertexOriginal"),
+                    o)
         glDrawElements(t, v.size, GL_UNSIGNED_SHORT, None)
 
     def DrawAxis(self):
         r = self.range
-        gx = 32/self.scale['base']
+        gx = 32 / self.scale['base']
         p = [r['xmax'], r['ymax'], r['zmax']]
-        vertex = np.array([p[0]-gx,   p[1],   p[2],
-                           p[0]-gx,   p[1]-gx,      p[2],
-                           p[0],      p[1]-gx,      p[2],
-                           p[0],      p[1],   p[2],
-                           p[0]-gx,   p[1], p[2],
-                           p[0],      p[1], p[2],
-                           p[0]-gx/3, p[1]+gx/5,   p[2],
-                           p[0]-gx/3, p[1]-gx/5, p[2]])
+        vertex = np.array([
+            p[0] - gx, p[1], p[2], p[0] - gx, p[1] - gx, p[2], p[0], p[1] - gx,
+            p[2], p[0], p[1], p[2], p[0] - gx, p[1], p[2], p[0], p[1], p[2],
+            p[0] - gx / 3, p[1] + gx / 5, p[2], p[0] - gx / 3, p[1] - gx / 5,
+            p[2]
+        ])
         self.DrawAxisHelp('x', vertex)
         p = [r['xmin'], r['ymax'], r['zmax']]
-        vertex = np.array([p[0],    p[1],    p[2],
-                           p[0],    p[1]-gx, p[2],
-                           p[0]+gx, p[1]-gx, p[2],
-                           p[0]+gx, p[1],    p[2],
-                           p[0], p[1]-gx,     p[2],
-                           p[0], p[1],    p[2],
-                           p[0]+gx/5,p[1]-gx/3,   p[2],
-                           p[0]-gx/5,p[1]-gx/3, p[2]])
+        vertex = np.array([
+            p[0], p[1], p[2], p[0], p[1] - gx, p[2], p[0] + gx, p[1] - gx,
+            p[2], p[0] + gx, p[1], p[2], p[0], p[1] - gx, p[2], p[0], p[1],
+            p[2], p[0] + gx / 5, p[1] - gx / 3, p[2], p[0] - gx / 5,
+            p[1] - gx / 3, p[2]
+        ])
         self.DrawAxisHelp('y', vertex)
         p = [r['xmin'], r['ymin'], r['zmax']]
-        vertex = np.array([p[0], p[1]+gx, p[2]-gx,
-                           p[0], p[1],    p[2]-gx,
-                           p[0], p[1],    p[2],
-                           p[0], p[1]+gx, p[2],
-                           p[0], p[1],  p[2]-gx,
-                           p[0], p[1],  p[2],
-                           p[0], p[1]+gx/5, p[2]-gx/3,
-                           p[0], p[1]-gx/5, p[2]-gx/3])
+        vertex = np.array([
+            p[0], p[1] + gx, p[2] - gx, p[0], p[1], p[2] - gx, p[0], p[1],
+            p[2], p[0], p[1] + gx, p[2], p[0], p[1], p[2] - gx, p[0], p[1],
+            p[2], p[0], p[1] + gx / 5, p[2] - gx / 3, p[0], p[1] - gx / 5,
+            p[2] - gx / 3
+        ])
         self.DrawAxisHelp('z', vertex)
 
     def DrawAxisHelp(self, letter, vertex):
@@ -1086,10 +1148,11 @@ class SurfaceBase(glcanvas.GLCanvas):
         tdc = wx.MemoryDC()
         tdc.SelectObject(bitmap)
         gc = wx.GraphicsContext.Create(tdc)
-        font = wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+        font = wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL,
+                       wx.FONTWEIGHT_NORMAL)
         gc.SetFont(font, wx.WHITE)
         tw, th = gc.GetTextExtent(letter)
-        gc.DrawText(letter, (W-tw)/2, (H-th)/2)
+        gc.DrawText(letter, (W - tw) / 2, (H - th) / 2)
         tdc.SelectObject(wx.NullBitmap)
 
         texture = self.glTextures[0]
@@ -1101,7 +1164,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA,
                      GL_UNSIGNED_BYTE, mybuffer.flatten())
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                        GL_LINEAR_MIPMAP_NEAREST)
         glGenerateMipmap(GL_TEXTURE_2D)
 
         glBindTexture(GL_TEXTURE_2D, 0)
@@ -1109,14 +1173,10 @@ class SurfaceBase(glcanvas.GLCanvas):
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, texture)
 
-        color = np.array([0, 1, 0, 1,
-                          0, 0, 0, 1,
-                          1, 0, 0, 1,
-                          1, 1, 0, 1,
-                          1, 1, 1, 1,
-                          1, 1, 1, 1,
-                          1, 1, 1, 1,
-                          1, 1, 1, 1])
+        color = np.array([
+            0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+        ])
         triangle = np.array([0, 1, 2, 0, 2, 3])
         mesh = np.array([4, 5, 5, 6, 5, 7])
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
@@ -1150,7 +1210,8 @@ class SurfaceBase(glcanvas.GLCanvas):
     def Draw2dImg(self):
         # Set Transformation Matrices, no rotation allowed in 2d mode
         TransformMatrix = np.eye(3, dtype=np.float32).flatten('F')
-        tmatrix = glGetUniformLocation(self.ShaderProgram, "TransformationMatrix")
+        tmatrix = glGetUniformLocation(self.ShaderProgram,
+                                       "TransformationMatrix")
         glUniformMatrix3fv(tmatrix, 1, GL_FALSE, TransformMatrix)
 
         W = self.dimension['x']
@@ -1160,8 +1221,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         glBindTexture(GL_TEXTURE_2D, self.glTextures[2])
         # the pointsClr is col-wise (i.e., 1st col, 2nd col...)
         mybuffer = self.pointsClr.astype(np.float32).flatten()
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, H, W, 0, GL_RGBA,
-                     GL_FLOAT, mybuffer)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, H, W, 0, GL_RGBA, GL_FLOAT,
+                     mybuffer)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
         glGenerateMipmap(GL_TEXTURE_2D)
@@ -1174,15 +1235,15 @@ class SurfaceBase(glcanvas.GLCanvas):
         xmax, xmin = self.range['xmax'], self.range['xmin']
         ymax, ymin = self.range['ymax'], self.range['ymin']
         zmax, zmin = self.range['zmax'], self.range['zmin']
-        vertex = np.array([xmin, ymax, zmin,
-                           xmin, ymin, zmin,
-                           xmax, ymin, zmin,
-                           xmax, ymax, zmin])
+        vertex = np.array([
+            xmin, ymax, zmin, xmin, ymin, zmin, xmax, ymin, zmin, xmax, ymax,
+            zmin
+        ])
         # texture coordinate
-        color = np.array([1-1./H, 0, 0, 1,
-                          0, 0, 0, 1,
-                          0, 1-1./W, 0, 1,
-                          1-1./H, 1-1./W, 0, 1])
+        color = np.array([
+            1 - 1. / H, 0, 0, 1, 0, 0, 0, 1, 0, 1 - 1. / W, 0, 1, 1 - 1. / H,
+            1 - 1. / W, 0, 1
+        ])
         triangle = np.array([0, 1, 2, 3])
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
         self.SetGLBuffer(vertex, color)
@@ -1192,24 +1253,21 @@ class SurfaceBase(glcanvas.GLCanvas):
         glLineWidth(2)
         if self.show['box']:
             r = self.range
-            vertex = np.array([r['xmin'], r['ymin'], r['zmin'],
-                               r['xmin'], r['ymax'], r['zmin'],
-                               r['xmax'], r['ymax'], r['zmin'],
-                               r['xmax'], r['ymin'], r['zmin'],
-                               r['xmin'], r['ymin'], r['zmax'],
-                               r['xmin'], r['ymax'], r['zmax'],
-                               r['xmax'], r['ymax'], r['zmax'],
-                               r['xmax'], r['ymin'], r['zmax']])
-            color = np.array([1, 1, 1, 1,
-                              1, 1, 1, 1,
-                              1, 1, 1, 1,
-                              1, 1, 1, 1,
-                              1, 1, 1, 1,
-                              1, 1, 1, 1,
-                              1, 1, 1, 1,
-                              1, 1, 1, 1])
-            axis = np.array([0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6,
-                             6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7])
+            vertex = np.array([
+                r['xmin'], r['ymin'], r['zmin'], r['xmin'], r['ymax'],
+                r['zmin'], r['xmax'], r['ymax'], r['zmin'], r['xmax'],
+                r['ymin'], r['zmin'], r['xmin'], r['ymin'], r['zmax'],
+                r['xmin'], r['ymax'], r['zmax'], r['xmax'], r['ymax'],
+                r['zmax'], r['xmax'], r['ymin'], r['zmax']
+            ])
+            color = np.array([
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+            ])
+            axis = np.array([
+                0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2,
+                6, 3, 7
+            ])
             self.SetGLBuffer(vertex, color)
             self.DrawElement(GL_LINES, axis, 0)
 
@@ -1223,7 +1281,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             if y < 0 or y >= self.raw_points['z'].shape[0]:
                 # out of range
                 return
-            d = self.raw_points['z'][y, :]*self.data_zscale
+            d = self.raw_points['z'][y, :] * self.data_zscale
             self.horzbar_buf.SetData(d)
             v, c, l = self.horzbar_buf.GetGLObject()
             self.SetGLBuffer(v, c)
@@ -1234,7 +1292,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             if x < 0 or x >= self.raw_points['z'].shape[1]:
                 # out of range
                 return
-            d = self.raw_points['z'][:, x]*self.data_zscale
+            d = self.raw_points['z'][:, x] * self.data_zscale
             self.vertbar_buf.SetData(d)
             v, c, l = self.vertbar_buf.GetGLObject()
 
@@ -1246,30 +1304,35 @@ class SurfaceBase(glcanvas.GLCanvas):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         #Setup shader
-        vertexResolution = glGetUniformLocation(self.ShaderProgram, "VertexResolution")
+        vertexResolution = glGetUniformLocation(self.ShaderProgram,
+                                                "VertexResolution")
         glUniform3f(vertexResolution, self.W, self.H, self.W)
 
         vertexOffset = glGetUniformLocation(self.ShaderProgram, "VertexOffset")
-        ox = self.offset['base']['x']+self.offset['user']['x']
-        oy = self.offset['base']['y']+self.offset['user']['y']
+        ox = self.offset['base']['x'] + self.offset['user']['x']
+        oy = self.offset['base']['y'] + self.offset['user']['y']
         glUniform3f(vertexOffset, ox, oy, self.offset['base']['x'])
 
-        vertexOffsetData = glGetUniformLocation(self.ShaderProgram, "VertexOffsetData")
+        vertexOffsetData = glGetUniformLocation(self.ShaderProgram,
+                                                "VertexOffsetData")
         glUniform3f(vertexOffsetData, self.data_offset['x'],
                     self.data_offset['y'], self.data_offset['z'])
 
         #Set Transformation Matrices
         TransformMatrix = self.rotate_matrix.flatten('F')
-        tmatrix = glGetUniformLocation(self.ShaderProgram, "TransformationMatrix")
+        tmatrix = glGetUniformLocation(self.ShaderProgram,
+                                       "TransformationMatrix")
         glUniformMatrix3fv(tmatrix, 1, GL_FALSE, TransformMatrix)
 
-        vertexScaleGL = glGetUniformLocation(self.ShaderProgram, "VertexScaleGL")
+        vertexScaleGL = glGetUniformLocation(self.ShaderProgram,
+                                             "VertexScaleGL")
         glUniform3f(vertexScaleGL, 1, -1, -1)
-        vertexScaleData = glGetUniformLocation(self.ShaderProgram, "VertexScaleData")
+        vertexScaleData = glGetUniformLocation(self.ShaderProgram,
+                                               "VertexScaleData")
         glUniform3f(vertexScaleData, 1, 1, self.data_zscale)
 
         vertexScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
-        scaleAll = self.scale['base']*self.scale['zoom']
+        scaleAll = self.scale['base'] * self.scale['zoom']
         glUniform3f(vertexScale, scaleAll, scaleAll, 1)
 
         if self.mode_2d:
@@ -1293,7 +1356,8 @@ class SurfaceBase(glcanvas.GLCanvas):
             bitmap = wx.Bitmap(HudW, HudH, depth=32)
             tdc.SelectObject(bitmap)
             gc = wx.GraphicsContext.Create(tdc)
-            font = wx.Font(14, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+            font = wx.Font(14, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL,
+                           wx.FONTWEIGHT_NORMAL)
             gc.SetFont(font, wx.WHITE)
             gc.DrawText(letter, 5, 5)
             tdc.SelectObject(wx.NullBitmap)
@@ -1314,15 +1378,12 @@ class SurfaceBase(glcanvas.GLCanvas):
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, texture)
 
-        vertex = np.array([-1, 1, -1,
-                           -1, 1-2.*HudH/H, -1,
-                           -1+2.*HudW/W, 1-2.*HudH/H, -1,
-                           -1+2.*HudW/W, 1, -1])
+        vertex = np.array([
+            -1, 1, -1, -1, 1 - 2. * HudH / H, -1, -1 + 2. * HudW / W,
+            1 - 2. * HudH / H, -1, -1 + 2. * HudW / W, 1, -1
+        ])
         # texture coordinate
-        color = np.array([0, 0, 0, 1,
-                          0, 1, 0, 1,
-                          1, 1, 0, 1,
-                          1, 0, 0, 1])
+        color = np.array([0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1])
         triangle = np.array([0, 1, 2, 3])
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
         self.SetGLBuffer(vertex, color)
@@ -1341,7 +1402,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         if z != 0:
             Rz = self.GetRotateMatrixZ(z)
             R = np.matmul(Rz, R)
-        self.rotation = {'x':0, 'y':0, 'z':0}
+        self.rotation = {'x': 0, 'y': 0, 'z': 0}
         self.rotate_matrix = R
         self.Refresh()
 
@@ -1353,7 +1414,7 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def GetRotateMatrixX(self, sign):
         Rx = np.zeros((3, 3), np.float32)
-        theta = sign*self.rotate_delta
+        theta = sign * self.rotate_delta
         Rx[0][0] = 1
         Rx[1][1] = math.cos(theta)
         Rx[1][2] = -math.sin(theta)
@@ -1363,7 +1424,7 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def GetRotateMatrixY(self, sign):
         Ry = np.zeros((3, 3), np.float32)
-        theta = sign*self.rotate_delta
+        theta = sign * self.rotate_delta
         Ry[0][0] = math.cos(theta)
         Ry[0][2] = math.sin(theta)
         Ry[1][1] = 1
@@ -1373,13 +1434,14 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def GetRotateMatrixZ(self, sign):
         Rz = np.zeros((3, 3), np.float32)
-        theta = sign*self.rotate_delta
+        theta = sign * self.rotate_delta
         Rz[0][0] = math.cos(theta)
         Rz[0][1] = -math.sin(theta)
         Rz[1][0] = math.sin(theta)
         Rz[1][1] = math.cos(theta)
         Rz[2][2] = 1
         return Rz
+
 
 class SelectedPixelBuf(object):
     def __init__(self, sz, rng):
@@ -1400,32 +1462,35 @@ class SelectedPixelBuf(object):
             return
         self.line_color = clr[:]
         if self.buf_size > 0:
-            self.color = np.repeat(np.array([clr]), self.buf_size, axis=0).flatten()
+            self.color = np.repeat(np.array([clr]), self.buf_size,
+                                   axis=0).flatten()
 
     def Resize(self, sz):
         self.buf_size = sz
         self.buf = np.zeros(sz)
         # make z value larger than zmax, so it shows on top of the surface.
-        self.vertex = np.ones((sz, 3))*self.range['zmax']*2.0
-        self.color = np.repeat(np.array([self.line_color]), sz, axis=0).flatten()
+        self.vertex = np.ones((sz, 3)) * self.range['zmax'] * 2.0
+        self.color = np.repeat(np.array([self.line_color]), sz,
+                               axis=0).flatten()
         self.line = np.arange(sz)
         self.idx = 0
 
     def GetGLObject(self, l, r, t, b, o, g):
         self.vertex[:, 0] = np.linspace(l, r, self.buf.size, endpoint=False)
-        self.vertex[:, 1] = b-(np.roll(self.buf, -(self.idx+1))-o)*g
+        self.vertex[:, 1] = b - (np.roll(self.buf, -(self.idx + 1)) - o) * g
         return self.vertex.flatten(), self.color, self.line
 
     def SetSelectedPos(self, pos):
         # pos is within [-self.buf.size+1, 0]
         self.color.fill(1)
-        pos = (self.buf.size - 1 + pos)%self.buf.size
+        pos = (self.buf.size - 1 + pos) % self.buf.size
         if pos >= 0 and pos < self.buf.size:
-            self.color[pos*4:(pos+1)*4] = [1, 0, 0, 1]
+            self.color[pos * 4:(pos + 1) * 4] = [1, 0, 0, 1]
 
     def SetData(self, d, idx):
         self.idx = idx
         self.buf[idx] = d
+
 
 class TrackingSurface(SurfaceBase):
     DISPLAY_ORIGINAL = 0
@@ -1437,6 +1502,7 @@ class TrackingSurface(SurfaceBase):
     ID_DISP_MAX = wx.NewId()
     ID_DISP_MIN = wx.NewId()
     ID_DISP_MINMAX = wx.NewId()
+
     def __init__(self, parent, points=None, buf_len=256):
         SurfaceBase.__init__(self, parent, points)
         self.buf_len = buf_len
@@ -1488,8 +1554,9 @@ class TrackingSurface(SurfaceBase):
             mn = np.mean(d)
             std = np.std(d)
             d = self.raw_points['z'][r, c]
-            self.SetHudText('(%d, %d) %f min: %f max: %f mean: %.2f std: %.2f'%
-                            (c, r, d, m, M, mn, std))
+            self.SetHudText(
+                '(%d, %d) %f min: %f max: %f mean: %.2f std: %.2f' %
+                (c, r, d, m, M, mn, std))
 
     def GetFrame(self, num):
         # get the num th frame,
@@ -1498,7 +1565,7 @@ class TrackingSurface(SurfaceBase):
         #  ...
         if self.frames is None:
             return None
-        idx = (self.frames_idx - 1 + num)%self.buf_len
+        idx = (self.frames_idx - 1 + num) % self.buf_len
         return self.frames[idx, :, :]
 
     def SetCurrentFrame(self, num):
@@ -1513,10 +1580,11 @@ class TrackingSurface(SurfaceBase):
 
     def NewFrameArrive(self, frame, silent=True):
         rows, cols = frame.shape
-        if self.frames is None or rows != self.frames.shape[1] or cols != self.frames.shape[2]:
+        if self.frames is None or rows != self.frames.shape[
+                1] or cols != self.frames.shape[2]:
             self.frames = np.zeros((self.buf_len, rows, cols))
             self.frames_idx = 0
-            self.SetImage({'z':frame})
+            self.SetImage({'z': frame})
 
         # all the following code is time sensitive, needs to finish as soon
         # as possible
@@ -1526,8 +1594,9 @@ class TrackingSurface(SurfaceBase):
             elif self.display_mode == self.DISPLAY_MIN:
                 frame = np.minimum(frame, self.frame_display)
             elif self.display_mode == self.DISPLAY_MINMAX:
-                frame = np.where(np.absolute(frame) > np.absolute(self.frame_display),
-                                 frame, self.frame_display)
+                frame = np.where(
+                    np.absolute(frame) > np.absolute(self.frame_display),
+                    frame, self.frame_display)
         self.frame_display = frame
 
         if self.frames.size:
@@ -1536,7 +1605,7 @@ class TrackingSurface(SurfaceBase):
             if r >= 0 and c >= 0 and r < rows and c < cols:
                 self.selected_buf.SetData(frame[r, c], self.frames_idx)
             else:
-                self.SetSelected({'x': 0, 'y':0})
+                self.SetSelected({'x': 0, 'y': 0})
 
         if not silent:
             # update the data
@@ -1561,16 +1630,17 @@ class TrackingSurface(SurfaceBase):
         ymax, ymin = self.range['ymax'], self.range['ymin']
         if self.default_rotate in [90, 270]:
             o = self.data_offset['y'] - self.data_offset['x']
-            xmax, xmin, ymax, ymin = ymax-o, ymin-o, xmax, xmin
-        v, c, l = self.selected_buf.GetGLObject(xmin, xmax, ymin, ymax,
-                   self.data_offset['z']-self.data_offset['y']/self.data_zscale,
-                                             self.data_zscale)
-        if len(l) >= 2**16-10:
+            xmax, xmin, ymax, ymin = ymax - o, ymin - o, xmax, xmin
+        v, c, l = self.selected_buf.GetGLObject(
+            xmin, xmax, ymin, ymax,
+            self.data_offset['z'] - self.data_offset['y'] / self.data_zscale,
+            self.data_zscale)
+        if len(l) >= 2**16 - 10:
             # if the buffer length is larger, draw line with multiple sections
-            for s in range(0, len(l), 2**16-10):
-                e = min(s+2**16-10+1, len(l))
-                self.SetGLBuffer(v[s*3:e*3], c[s*4:e*4])
-                self.DrawElement(GL_LINE_STRIP, l[s:e]-l[s], 0, 2)
+            for s in range(0, len(l), 2**16 - 10):
+                e = min(s + 2**16 - 10 + 1, len(l))
+                self.SetGLBuffer(v[s * 3:e * 3], c[s * 4:e * 4])
+                self.DrawElement(GL_LINE_STRIP, l[s:e] - l[s], 0, 2)
         else:
             self.SetGLBuffer(v, c)
             self.DrawElement(GL_LINE_STRIP, l, 0, 2)
@@ -1582,10 +1652,12 @@ class TrackingSurface(SurfaceBase):
         else:
             menu.AppendSeparator()
         display = wx.Menu()
-        display.Append(self.ID_DISP_ORIGINAL, 'Original\tshift+o', '', wx.ITEM_CHECK)
+        display.Append(self.ID_DISP_ORIGINAL, 'Original\tshift+o', '',
+                       wx.ITEM_CHECK)
         display.Append(self.ID_DISP_MAX, 'Max\tshift+m', '', wx.ITEM_CHECK)
         display.Append(self.ID_DISP_MIN, 'Min\tshift+n', '', wx.ITEM_CHECK)
-        display.Append(self.ID_DISP_MINMAX, 'Min-Max\tshift+r', '', wx.ITEM_CHECK)
+        display.Append(self.ID_DISP_MINMAX, 'Min-Max\tshift+r', '',
+                       wx.ITEM_CHECK)
         menu.AppendSubMenu(display, 'Display')
         return menu
 
