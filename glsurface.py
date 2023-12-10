@@ -127,19 +127,19 @@ class SimpleBarBuf(object):
 
 
 class SurfaceBase(glcanvas.GLCanvas):
-    ID_SHOW_2D = wx.NewId()
-    ID_SHOW_STEP_SURFACE = wx.NewId()
-    ID_SHOW_TRIANGLE = wx.NewId()
-    ID_SHOW_MESH = wx.NewId()
-    ID_SHOW_CONTOUR = wx.NewId()
-    ID_SHOW_BOX = wx.NewId()
-    ID_SHOW_AXIS = wx.NewId()
-    ID_SHOW_HORZ_BAR = wx.NewId()
-    ID_SHOW_VERT_BAR = wx.NewId()
-    ID_ROTATE_0 = wx.NewId()
-    ID_ROTATE_90 = wx.NewId()
-    ID_ROTATE_180 = wx.NewId()
-    ID_ROTATE_270 = wx.NewId()
+    ID_SHOW_2D = wx.NewIdRef()
+    ID_SHOW_STEP_SURFACE = wx.NewIdRef()
+    ID_SHOW_TRIANGLE = wx.NewIdRef()
+    ID_SHOW_MESH = wx.NewIdRef()
+    ID_SHOW_CONTOUR = wx.NewIdRef()
+    ID_SHOW_BOX = wx.NewIdRef()
+    ID_SHOW_AXIS = wx.NewIdRef()
+    ID_SHOW_HORZ_BAR = wx.NewIdRef()
+    ID_SHOW_VERT_BAR = wx.NewIdRef()
+    ID_ROTATE_0 = wx.NewIdRef()
+    ID_ROTATE_90 = wx.NewIdRef()
+    ID_ROTATE_180 = wx.NewIdRef()
+    ID_ROTATE_270 = wx.NewIdRef()
 
     def __init__(self, parent, points=None):
         # set the depth size, otherwise the depth test may not work correctly.
@@ -1497,11 +1497,11 @@ class TrackingSurface(SurfaceBase):
     DISPLAY_MAX = 1
     DISPLAY_MIN = 2
     DISPLAY_MINMAX = 3
-    ID_SIM_CLEAR = wx.NewId()
-    ID_DISP_ORIGINAL = wx.NewId()
-    ID_DISP_MAX = wx.NewId()
-    ID_DISP_MIN = wx.NewId()
-    ID_DISP_MINMAX = wx.NewId()
+    ID_SIM_CLEAR = wx.NewIdRef()
+    ID_DISP_ORIGINAL = wx.NewIdRef()
+    ID_DISP_MAX = wx.NewIdRef()
+    ID_DISP_MIN = wx.NewIdRef()
+    ID_DISP_MINMAX = wx.NewIdRef()
 
     def __init__(self, parent, points=None, buf_len=256):
         SurfaceBase.__init__(self, parent, points)

@@ -19,7 +19,7 @@ class RunApp(wx.App):
 
 
 class MainFrame(wx.Frame):
-    ID_SHOW_CONSOLE = wx.NewId()
+    ID_SHOW_CONSOLE = wx.NewIdRef()
 
     def __init__(self):
         wx.Frame.__init__(self, None, -1, 'glsurface demo', size=(410, 432))
@@ -80,8 +80,8 @@ def BitmapFromXPM(xpm):
 
 
 class SurfacePanel(wx.Panel):
-    ID_RUN = wx.NewId()
-    ID_PAUSE = wx.NewId()
+    ID_RUN = wx.NewIdRef()
+    ID_PAUSE = wx.NewIdRef()
 
     def __init__(self, parent):
         wx.Panel.__init__(self, parent, -1)
