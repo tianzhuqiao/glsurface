@@ -1116,35 +1116,43 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def DrawAxis(self):
         r = self.range
+        scale = self.GetContentScaleFactor()
         gx = 32 / self.scale['base']
+        rx = r['xmax'] - r['xmin']
+        if rx <= 0:
+            return
+        gy = gx / rx * (r['ymax'] - r['ymin'])
+        gz = gx / rx * (r['zmax'] - r['zmin'])
         p = [r['xmax'], r['ymax'], r['zmax']]
         vertex = np.array([
-            p[0] - gx, p[1], p[2], p[0] - gx, p[1] - gx, p[2], p[0], p[1] - gx,
+            p[0] - gx, p[1], p[2], p[0] - gx, p[1] - gy, p[2], p[0], p[1] - gy,
             p[2], p[0], p[1], p[2], p[0] - gx, p[1], p[2], p[0], p[1], p[2],
-            p[0] - gx / 3, p[1] + gx / 5, p[2], p[0] - gx / 3, p[1] - gx / 5,
+            p[0] - gx / 3, p[1] + gy / 5, p[2], p[0] - gx / 3, p[1] - gy / 5,
             p[2]
         ])
         self.DrawAxisHelp('x', vertex)
         p = [r['xmin'], r['ymax'], r['zmax']]
         vertex = np.array([
-            p[0], p[1], p[2], p[0], p[1] - gx, p[2], p[0] + gx, p[1] - gx,
-            p[2], p[0] + gx, p[1], p[2], p[0], p[1] - gx, p[2], p[0], p[1],
-            p[2], p[0] + gx / 5, p[1] - gx / 3, p[2], p[0] - gx / 5,
-            p[1] - gx / 3, p[2]
+            p[0], p[1], p[2], p[0], p[1] - gy, p[2], p[0] + gx, p[1] - gy,
+            p[2], p[0] + gx, p[1], p[2], p[0], p[1] - gy, p[2], p[0], p[1],
+            p[2], p[0] + gx / 5, p[1] - gy / 3, p[2], p[0] - gx / 5,
+            p[1] - gy / 3, p[2]
         ])
         self.DrawAxisHelp('y', vertex)
         p = [r['xmin'], r['ymin'], r['zmax']]
         vertex = np.array([
-            p[0], p[1] + gx, p[2] - gx, p[0], p[1], p[2] - gx, p[0], p[1],
-            p[2], p[0], p[1] + gx, p[2], p[0], p[1], p[2] - gx, p[0], p[1],
-            p[2], p[0], p[1] + gx / 5, p[2] - gx / 3, p[0], p[1] - gx / 5,
-            p[2] - gx / 3
+            p[0], p[1] + gy, p[2] - gz, p[0], p[1], p[2] - gz, p[0], p[1],
+            p[2], p[0], p[1] + gy, p[2], p[0], p[1], p[2] - gz, p[0], p[1],
+            p[2], p[0], p[1] + gy / 5, p[2] - gz / 3, p[0], p[1] - gy / 5,
+            p[2] - gz / 3
         ])
         self.DrawAxisHelp('z', vertex)
 
     def DrawAxisHelp(self, letter, vertex):
-        W, H = 32, 32
-        bitmap = wx.Bitmap(W, H, 32)
+        scale = self.GetContentScaleFactor()*self.scale['base']
+        W, H = int(32*scale), int(32*scale)
+        bitmap = wx.Bitmap(W, H, depth=32)
+        bitmap.SetScaleFactor(scale)
         tdc = wx.MemoryDC()
         tdc.SelectObject(bitmap)
         gc = wx.GraphicsContext.Create(tdc)
@@ -1152,7 +1160,7 @@ class SurfaceBase(glcanvas.GLCanvas):
                        wx.FONTWEIGHT_NORMAL)
         gc.SetFont(font, wx.WHITE)
         tw, th = gc.GetTextExtent(letter)
-        gc.DrawText(letter, (W - tw) / 2, (H - th) / 2)
+        gc.DrawText(letter, (32-tw)//2, (32-th)//2)
         tdc.SelectObject(wx.NullBitmap)
 
         texture = self.glTextures[0]
@@ -1177,11 +1185,11 @@ class SurfaceBase(glcanvas.GLCanvas):
             0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1
         ])
-        triangle = np.array([0, 1, 2, 0, 2, 3])
+        triangle = np.array([0, 1, 2, 3])
         mesh = np.array([4, 5, 5, 6, 5, 7])
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
         self.SetGLBuffer(vertex, color)
-        self.DrawElement(GL_TRIANGLES, triangle, 3)
+        self.DrawElement(GL_QUADS, triangle, 3)
         self.DrawElement(GL_LINES, mesh, 0)
 
     def Draw3dImg(self):
@@ -1346,14 +1354,16 @@ class SurfaceBase(glcanvas.GLCanvas):
     def DrawHud(self):
         if not self._hudtext and not self.hudtext:
             return
-        W, H = int(self.W), int(self.H)
+        scale = self.GetContentScaleFactor()
+        W, H = int(self.W*scale), int(self.H*scale)
         HudW, HudH = self._hudBuffer.shape[0:2]
         if self._hudtext != self.hudtext or HudW < W:
             self._hudtext = self.hudtext
             letter = self.hudtext
             tdc = wx.MemoryDC()
-            HudW, HudH = W, 38
+            HudW, HudH = W, int(38*scale)
             bitmap = wx.Bitmap(HudW, HudH, depth=32)
+            bitmap.SetScaleFactor(scale)
             tdc.SelectObject(bitmap)
             gc = wx.GraphicsContext.Create(tdc)
             font = wx.Font(14, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL,
