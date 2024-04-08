@@ -1160,7 +1160,11 @@ class SurfaceBase(glcanvas.GLCanvas):
                        wx.FONTWEIGHT_NORMAL)
         gc.SetFont(font, wx.WHITE)
         tw, th = gc.GetTextExtent(letter)
-        gc.DrawText(letter, (32-tw)//2, (32-th)//2)
+        if wx.Platform == '__WXMSW__':
+            # in windows, tw, th is after scale
+            gc.DrawText(letter, (W-tw)//2, (H-th)//2)
+        else:
+            gc.DrawText(letter, (32-tw)//2, (32-th)//2)
         tdc.SelectObject(wx.NullBitmap)
 
         texture = self.glTextures[0]
@@ -1168,7 +1172,9 @@ class SurfaceBase(glcanvas.GLCanvas):
         glBindTexture(GL_TEXTURE_2D, texture)
         mybuffer = np.zeros((W, H, 4), np.uint8)
         bitmap.CopyToBuffer(mybuffer, wx.BitmapBufferFormat_RGBA)
-
+        if wx.Platform == '__WXMSW__':
+            # remove black background in windows by setting the corresponding alpha channel to 0
+            mybuffer[:, :, -1] = mybuffer[:, :, 0]
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA,
                      GL_UNSIGNED_BYTE, mybuffer.flatten())
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
@@ -1373,6 +1379,9 @@ class SurfaceBase(glcanvas.GLCanvas):
             tdc.SelectObject(wx.NullBitmap)
             self._hudBuffer = np.zeros((HudW, HudH, 4), np.uint8)
             bitmap.CopyToBuffer(self._hudBuffer, wx.BitmapBufferFormat_RGBA)
+            if wx.Platform == '__WXMSW__':
+                # remove black background in windows by setting the corresponding alpha channel to 0
+                self._hudBuffer[:, :, -1] = self._hudBuffer[:, :, 0]
         texture = self.glTextures[1]
         glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
         glBindTexture(GL_TEXTURE_2D, texture)
