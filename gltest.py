@@ -2,7 +2,7 @@ import wx
 import wx.lib.agw.aui as aui
 import wx.py as py
 import numpy as np
-from glsurface import TrackingSurface
+from glsurface.glsurface import TrackingSurface
 from _simxpm import run_xpm, pause_xpm
 import ctypes
 try:

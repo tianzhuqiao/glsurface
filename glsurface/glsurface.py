@@ -86,6 +86,8 @@ class SimpleBarBuf(object):
                                    axis=0).flatten()
 
     def Resize(self, sz):
+        if sz == self.buf_size:
+            return
         self.buf_size = sz
         zmax = self.range['zmax']
         self.vertex = np.zeros((sz * 4, 3))
@@ -204,7 +206,10 @@ class SurfaceBase(glcanvas.GLCanvas):
         self._hudtext = ''
         self._hudBuffer = np.zeros((0, 0, 4))
         # buffers to draw bar
-        rows, cols = self.raw_points['z'].shape
+        if self.raw_points is not None and 'z' in self.raw_points:
+            rows, cols = self.raw_points['z'].shape
+        else:
+            rows, cols = 16, 16
         self.horzbar_buf = SimpleBarBuf(cols, self.range, True)
         self.vertbar_buf = SimpleBarBuf(rows, self.range, False)
 
@@ -224,12 +229,16 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.Bind(wx.EVT_LEFT_DOWN, self.OnMouseDown)
         self.Bind(wx.EVT_LEFT_UP, self.OnMouseUp)
         self.Bind(wx.EVT_MOTION, self.OnMouseMotion)
-        self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown)
+        self.Bind(wx.EVT_CHAR_HOOK, self.OnKeyDown)
         self.Bind(wx.EVT_LEFT_DCLICK, self.OnDoubleClick)
         self.Bind(wx.EVT_MOUSEWHEEL, self.OnMouseWheel)
         self.Bind(wx.EVT_CONTEXT_MENU, self.OnContextMenu)
         self.Bind(wx.EVT_MENU, self.OnProcessMenuEvent)
         self.Bind(wx.EVT_UPDATE_UI, self.OnUpdateMenu)
+
+    def Clear(self):
+        self.raw_points = None
+        self.Refresh()
 
     def GetAccelList(self):
         accel_tbl = [
@@ -267,7 +276,7 @@ class SurfaceBase(glcanvas.GLCanvas):
                         wx.ITEM_CHECK)
         elements.Append(self.ID_SHOW_VERT_BAR, 'Show Vert Bar\tshift+v', '',
                         wx.ITEM_CHECK)
-        menu.AppendSeparator()
+
         menu.AppendSubMenu(elements, 'Elements')
         rotate = wx.Menu()
         rotate.Append(self.ID_ROTATE_0, 'Rotate 0 degree', '', wx.ITEM_CHECK)
@@ -423,12 +432,21 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def OnPaint(self, event):
         #dc = wx.PaintDC(self)
+        if self.raw_points is None:
+            sz = self.GetClientSize()
+            dc = wx.PaintDC(self)
+            clr = self.background_color
+            clr = wx.Colour(int(clr[0]*255), int(clr[1]*255), int(clr[2]*255), int(clr[3]*255))
+            dc.SetBrush(wx.Brush(clr))
+            dc.DrawRectangle(0, 0, sz[0], sz[1])
+            return
         self.SetCurrent(self.context)
         if not self.initialized:
             self.initialized = True
             self.Initialize()
         self.Draw()
         self.SwapBuffers()
+        event.Skip()
 
     def Initialize(self):
         self.InitGL()
@@ -481,6 +499,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.glTextures = glGenTextures(3)  # axis, hud, 2d image
 
     def OnKeyDown(self, event):
+        event.Skip()
         if event.ShiftDown():
             if self.mode_2d:
                 event.Skip()
@@ -544,8 +563,10 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.drag_start.x = (pos.x - bRect.left)  #*(self.W/bRect.width)
         self.drag_start.y = (pos.y - bRect.top)  #*(self.H/bRect.height)
         self.is_mouse_down = True
+        event.Skip()
 
     def OnMouseMotion(self, event):
+        event.Skip()
         bRect = self.GetClientRect()
         pos = event.GetPosition()
         self.drag_end.x = (pos.x - bRect.left)  #*((self.W)/bRect.width)
@@ -573,10 +594,12 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.is_mouse_down = False
         self.is_dragging = False
         self.Refresh()
+        event.Skip()
 
     def OnDoubleClick(self, event):
         self.ResetRotate()
         self.Refresh()
+        event.Skip()
 
     def OnMouseWheel(self, event):
         delta = (event.GetWheelRotation() > 0) * 2 - 1
@@ -592,6 +615,8 @@ class SurfaceBase(glcanvas.GLCanvas):
             user['x'] = x - (x - base['x'] - user['x']) * zoom - base['x']
             user['y'] = y - (y - base['y'] - user['y']) * zoom - base['y']
             self.Refresh()
+
+        event.Skip()
 
     def ResetRotate(self):
         # reset rotation, zoom, offset
@@ -747,6 +772,9 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.raw_points['z'] = points
         self.UpdateHudText()
         rows, cols = points.shape
+        self.horzbar_buf.Resize(cols)
+        self.vertbar_buf.Resize(rows)
+
         self.Pz[0:rows, 0:cols] = points
         self.Pz[-1, :] = self.Pz[-2, :]
         self.Pz[:, -1] = self.Pz[:, -2]
@@ -922,6 +950,7 @@ class SurfaceBase(glcanvas.GLCanvas):
                     vertex = (np.array(vertex) + [ox, oy, oz]).flatten()
                     colour = np.array(colour).flatten()
                     vertexAll.append(vertex)
+                    mesh = np.array(mesh).flatten()
                     meshAll.append(mesh)
                     colourAll.append(colour)
                     vertex = []
@@ -1219,6 +1248,7 @@ class SurfaceBase(glcanvas.GLCanvas):
                     ctr = obj['Contour'][b]
                     for c in range(len(ctr['Vertices'])):
                         self.SetGLBuffer(ctr['Vertices'][c], ctr['Color'][c])
+                        print(type(ctr['Mesh'][c]))
                         self.DrawElement(GL_LINES, ctr['Mesh'][c], 0)
 
     def Draw2dImg(self):
@@ -1530,9 +1560,10 @@ class TrackingSurface(SurfaceBase):
         self.display_mode = self.DISPLAY_ORIGINAL
         self.frame_display = None
         self.selected_buf = None
+        self.SetBufLen(self.buf_len)
 
     def Initialize(self):
-        self.SetBufLen(self.buf_len)
+        #self.SetBufLen(self.buf_len)
         super(TrackingSurface, self).Initialize()
 
     def GetAccelList(self):
@@ -1597,13 +1628,30 @@ class TrackingSurface(SurfaceBase):
         self.UpdateImage(self.GetFrame(num))
         self.selected_buf.SetSelectedPos(num)
 
+    def SetFrames(self, frames, time_axis=0, silent=True):
+        self.Clear()
+        if len(frames.shape) == 2:
+            self.NewFrameArrive(frames, silent=silent)
+        elif len(frames.shape) == 3:
+            frames = np.moveaxis(frames, time_axis, 0)
+            shape = list(frames.shape)
+            for f in range(shape[0]):
+                self.NewFrameArrive(frames[f, :, :], silent=silent)
+
     def NewFrameArrive(self, frame, silent=True):
+
         rows, cols = frame.shape
-        if self.frames is None or rows != self.frames.shape[
-                1] or cols != self.frames.shape[2]:
+        if self.frames is None or rows != self.frames.shape[1] \
+                or cols != self.frames.shape[2]:
             self.frames = np.zeros((self.buf_len, rows, cols))
             self.frames_idx = 0
+            if self.raw_points and 'z' in self.raw_points and self.raw_points['z'].shape == frame.shape:
+                self.frames[self.frames_idx, :, :] = self.raw_points['z']
+                self.frames_idx += 1
+                self.frames_idx %= self.buf_len
+
             self.SetImage({'z': frame})
+
 
         # all the following code is time sensitive, needs to finish as soon
         # as possible
@@ -1636,6 +1684,7 @@ class TrackingSurface(SurfaceBase):
     def Clear(self):
         self.frame_display = None
         self.frames = None
+        super().Clear()
 
     def Draw(self):
         super(TrackingSurface, self).Draw()

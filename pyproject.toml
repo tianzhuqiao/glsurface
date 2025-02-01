@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=67.6.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glsurface"
+authors = [
+  { name="Tianzhu Qiao", email="tq@feiyilin.com" },
+]
+license = {file = "LICENSE"}
+description='Some helper class'
+readme = "README.md"
+requires-python = ">=3.0"
+classifiers = [
+    "Operating System :: OS Independent",
+]
+dependencies = [
+          'wxpython>=4.2.1', 'PyOpenGL', 'PyOpenGL-accelerate'
+      ]
+dynamic = ["version"]
+
+[tool.setuptools.dynamic]
+version = {attr = "glsurface.__version__"}
+
+[project.urls]
+"Homepage" = "https://github.com/tianzhuqiao/glsurface"
+
+[tool.setuptools.packages]
+find = {}
+
+[options]
+include_package_data = true
