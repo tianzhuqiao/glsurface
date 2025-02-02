@@ -213,7 +213,11 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.horzbar_buf = SimpleBarBuf(cols, self.range, True)
         self.vertbar_buf = SimpleBarBuf(rows, self.range, False)
 
+        self.pixels = None
+        self.pixels_size = (0, 0)
+
         self.background_color = [0, 0, 0, 1]
+        self.SetBackgroundColour(np.array(self.background_color)*255)
 
         # Ugly. do not call SetImage or similar methods here, since it may be
         # overridden or may call some overridden methods. Instead, it should be
@@ -291,6 +295,7 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def SetSurfaceBackground(self, clr):
         self.background_color = clr
+        self.SetBackgroundColour(clr)
         self.Refresh()
 
     def GetSurfaceBackground(self):
@@ -431,22 +436,22 @@ class SurfaceBase(glcanvas.GLCanvas):
         event.Skip()
 
     def OnPaint(self, event):
-        #dc = wx.PaintDC(self)
+        dc = wx.PaintDC(self)
         if self.raw_points is None:
-            sz = self.GetClientSize()
-            dc = wx.PaintDC(self)
-            clr = self.background_color
-            clr = wx.Colour(int(clr[0]*255), int(clr[1]*255), int(clr[2]*255), int(clr[3]*255))
-            dc.SetBrush(wx.Brush(clr))
-            dc.DrawRectangle(0, 0, sz[0], sz[1])
             return
         self.SetCurrent(self.context)
         if not self.initialized:
             self.initialized = True
             self.Initialize()
         self.Draw()
+
+        # save the buffer
+        view = glGetIntegerv(GL_VIEWPORT)
+        self.pixels = glReadPixels(view[0], view[1], view[2], view[3], GL_RGBA, GL_UNSIGNED_BYTE)
+        self.pixels_size = (view[2], view[3])
+
+        # actual drawing
         self.SwapBuffers()
-        event.Skip()
 
     def Initialize(self):
         self.InitGL()
@@ -497,6 +502,21 @@ class SurfaceBase(glcanvas.GLCanvas):
         # generate the buffer
         self.glBufs = glGenBuffers(3)
         self.glTextures = glGenTextures(3)  # axis, hud, 2d image
+
+    def GetBitmap(self):
+        if self.pixels is not None:
+            bitmap = wx.Bitmap.FromBufferRGBA(int(self.pixels_size[0]),
+                                              int(self.pixels_size[1]),
+                                              self.pixels)
+            scale_factor = self.GetContentScaleFactor()
+            bitmap.SetScaleFactor(scale_factor)
+
+            img = bitmap.ConvertToImage()
+            img = img.Mirror(False)
+            bitmap = img.ConvertToBitmap()
+            bitmap.SetScaleFactor(scale_factor)
+            return bitmap
+        return None
 
     def OnKeyDown(self, event):
         event.Skip()
@@ -1551,6 +1571,7 @@ class TrackingSurface(SurfaceBase):
     ID_DISP_MAX = wx.NewIdRef()
     ID_DISP_MIN = wx.NewIdRef()
     ID_DISP_MINMAX = wx.NewIdRef()
+    ID_AUTO_SCALE = wx.NewIdRef()
 
     def __init__(self, parent, points=None, buf_len=256):
         SurfaceBase.__init__(self, parent, points)
@@ -1572,7 +1593,9 @@ class TrackingSurface(SurfaceBase):
                       (wx.ACCEL_SHIFT, ord('M'), self.ID_DISP_MAX),
                       (wx.ACCEL_SHIFT, ord('O'), self.ID_DISP_ORIGINAL),
                       (wx.ACCEL_SHIFT, ord('N'), self.ID_DISP_MIN),
-                      (wx.ACCEL_SHIFT, ord('R'), self.ID_DISP_MINMAX)]
+                      (wx.ACCEL_SHIFT, ord('R'), self.ID_DISP_MINMAX),
+                      (wx.ACCEL_SHIFT|wx.ACCEL_CTRL, ord('A'), self.ID_AUTO_SCALE),
+                      ]
         return accel_tbl
 
     def SetBufLen(self, sz):
@@ -1628,13 +1651,18 @@ class TrackingSurface(SurfaceBase):
         self.UpdateImage(self.GetFrame(num))
         self.selected_buf.SetSelectedPos(num)
 
-    def SetFrames(self, frames, time_axis=0, silent=True):
+    def SetFrames(self, frames, reset_buf_len=False, time_axis=0, silent=True):
         self.Clear()
         if len(frames.shape) == 2:
+            if reset_buf_len:
+                self.SetBufLen(1)
             self.NewFrameArrive(frames, silent=silent)
         elif len(frames.shape) == 3:
             frames = np.moveaxis(frames, time_axis, 0)
             shape = list(frames.shape)
+
+            if reset_buf_len:
+                self.SetBufLen(shape[0])
             for f in range(shape[0]):
                 self.NewFrameArrive(frames[f, :, :], silent=silent)
 
@@ -1717,7 +1745,11 @@ class TrackingSurface(SurfaceBase):
         menu = super(TrackingSurface, self).GetContextMenu()
         if not menu:
             menu = wx.Menu()
+            menu.Append(self.ID_AUTO_SCALE, 'Auto scale\tshift+ctrl+A')
+            menu.AppendSeparator()
         else:
+            menu.Insert(0, self.ID_AUTO_SCALE, 'Auto scale\tshift+ctrl+A')
+            menu.InsertSeparator(1)
             menu.AppendSeparator()
         display = wx.Menu()
         display.Append(self.ID_DISP_ORIGINAL, 'Original\tshift+o', '',
@@ -1754,5 +1786,7 @@ class TrackingSurface(SurfaceBase):
             self.display_mode = self.DISPLAY_MIN
         elif eid == self.ID_DISP_MINMAX:
             self.display_mode = self.DISPLAY_MINMAX
+        elif eid == self.ID_AUTO_SCALE:
+            self.SetImage(self.raw_points)
         else:
             super(TrackingSurface, self).OnProcessMenuEvent(event)
