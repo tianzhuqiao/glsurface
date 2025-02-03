@@ -1010,11 +1010,22 @@ class SurfaceBase(glcanvas.GLCanvas):
         triangleAll = []
         meshAll = []
         contourAll = []
-        block = int(len(self.points) * 4 / (2**16) + 1)
         my = self.dimension['y']
         mx = self.dimension['x']
-        # the index of each block
-        blocks = np.linspace(0, len(self.points), block + 1, dtype=int)
+        # initial guess of the number of blocks
+        # subtract 'my', as last column in self.points is artificial (guard),
+        # it is same as the 2nd last column (the last column of the actual
+        # data). The last column is to simplify the following process, so no need
+        # to worry about the boundary condition of the last column
+        block = int(np.ceil((len(self.points) - my) * 4 / (2**16 - (my+1)*4)))
+        # the index of each block, and make sure the size of each block is < 2**16
+        while True:
+            blocks = np.linspace(0, len(self.points)-my, block + 1, dtype=int)
+            if np.any((blocks[1:] - blocks[:-1] + my + 1)*4 > 2**16):
+                block +=1
+                continue
+            break
+
         self.blocks = blocks
         r = blocks[0]
         l = 0
@@ -1073,7 +1084,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             triangle = np.zeros(((r - l) * 3, 4))
             # the current quad
             # triangle.append([4*i, 4*i+1, 4*i+2, 4*i+3])
-            triangle[0:r - l, :] = idx + [0, 1, 2, 3]
+            triangle[0:(r - l), :] = idx + [0, 1, 2, 3]
 
             # connect to the quad right
             # triangle.append([4*i+3, 4*i+2, 4*(i+my)+1, 4*(i+my)])
@@ -1081,7 +1092,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             #rr = rr.clip(0, my-1)
             cc = COLS + [0, 0, 1, 1]
             cc = cc.clip(0, mx - 1)
-            triangle[r - l:2 * (r - l), :] = (cc * my + rr) * 4 + [3, 2, 1, 0]
+            triangle[(r - l):2 * (r - l), :] = (cc * my + rr) * 4 + [3, 2, 1, 0]
 
             # connect to the quad below
             # triangle.append([4*i+1, 4*(i+1), 4*(i+1)+3, 4*(i)+2])
@@ -1089,8 +1100,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             rr = rr.clip(0, my - 1)
             cc = COLS  #+ [0, 0, 0, 0]
             #cc = cc.clip(0, mx-1)
-            triangle[2 * (r - l):3 *
-                     (r - l), :] = (cc * my + rr) * 4 + [1, 0, 3, 2]
+            triangle[2 * (r - l):3 * (r - l), :] = (cc * my + rr) * 4 + [1, 0, 3, 2]
 
             # mesh
             mesh = None
@@ -1098,8 +1108,8 @@ class SurfaceBase(glcanvas.GLCanvas):
                 mesh = np.zeros(((r - l) * 4, 4))
                 # mesh in the same quad
                 # mesh.append([4*i, 4*i+1, 4*i+1, 4*i+2, 4*i+2, 4*i+3, 4*i+3, 4*i])
-                mesh[0 * (r - l):1 * r - l] = idx + [0, 1, 1, 2]
-                mesh[1 * (r - l):2 * r - l] = idx + [2, 3, 3, 0]
+                mesh[0 * (r - l):1 * (r - l)] = idx + [0, 1, 1, 2]
+                mesh[1 * (r - l):2 * (r - l)] = idx + [2, 3, 3, 0]
 
                 # connect to the quad right
                 # mesh.append([4*i+3, 4*(i+my), 4*i+2, 4*(i+my)+1])
@@ -1107,8 +1117,7 @@ class SurfaceBase(glcanvas.GLCanvas):
                 #rr = rr.clip(0, my-1)
                 cc = COLS + [0, 1, 0, 1]
                 cc = cc.clip(0, mx - 1)
-                mesh[2 * (r - l):3 *
-                     (r - l), :] = (cc * my + rr) * 4 + [3, 0, 2, 1]
+                mesh[2 * (r - l):3 * (r - l), :] = (cc * my + rr) * 4 + [3, 0, 2, 1]
 
                 # connect to the quad below
                 # mesh.append([4*i+1, 4*(i+1), 4*i+2, 4*(i+1)+3])
@@ -1116,8 +1125,7 @@ class SurfaceBase(glcanvas.GLCanvas):
                 rr = rr.clip(0, my - 1)
                 cc = COLS  #+ [0, 0, 0, 0]
                 #cc = cc.clip(0, mx-1)
-                mesh[3 * (r - l):4 *
-                     (r - l), :] = (cc * my + rr) * 4 + [1, 0, 2, 3]
+                mesh[3 * (r - l):4 * (r - l), :] = (cc * my + rr) * 4 + [1, 0, 2, 3]
 
                 mesh = mesh.flatten()
             contour = None
@@ -1135,7 +1143,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             'block': block,
             'Color': colorAll,
             'Vertices': vertexAll,
-            'Trinagles': triangleAll,
+            'Triangles': triangleAll,
             'Mesh': meshAll,
             'Contour': contourAll
         }
@@ -1260,7 +1268,7 @@ class SurfaceBase(glcanvas.GLCanvas):
                 if self.show['surface']:
                     # if surface is on, show the mesh in blue
                     clr_mesh = 1
-                    self.DrawElement(GL_QUADS, obj['Trinagles'][b], 0)
+                    self.DrawElement(GL_QUADS, obj['Triangles'][b], 0)
                 if self.show['mesh']:
                     self.DrawElement(GL_LINES, obj['Mesh'][b], clr_mesh, 3)
 
