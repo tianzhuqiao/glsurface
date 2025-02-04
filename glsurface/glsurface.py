@@ -206,6 +206,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.hudtext = ''
         self._hudtext = ''
         self._hudBuffer = np.zeros((0, 0, 4))
+        self.hudtext_clr = wx.WHITE
+        self.hudtext_font = wx.Font(14, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
         # buffers to draw bar
         if self.raw_points is not None and 'z' in self.raw_points:
             rows, cols = self.raw_points['z'].shape
@@ -261,27 +263,31 @@ class SurfaceBase(glcanvas.GLCanvas):
         if menu:
             self.PopupMenu(menu)
 
-    def GetContextMenu(self):
+    def BuildElementMenu(self):
         menu = wx.Menu()
-        elements = wx.Menu()
-        elements.Append(self.ID_SHOW_2D, 'Show 2D Mode', '', wx.ITEM_CHECK)
-        elements.AppendSeparator()
-        elements.Append(self.ID_SHOW_STEP_SURFACE, 'Step Surface', '',
-                        wx.ITEM_CHECK)
-        elements.Append(self.ID_SHOW_TRIANGLE, 'Show Surface\tshift+s', '',
-                        wx.ITEM_CHECK)
-        elements.Append(self.ID_SHOW_MESH, 'Show Mesh', '', wx.ITEM_CHECK)
-        elements.AppendSeparator()
-        elements.Append(self.ID_SHOW_CONTOUR, 'Show Contour', '',
-                        wx.ITEM_CHECK)
-        elements.Append(self.ID_SHOW_BOX, 'Show Box', '', wx.ITEM_CHECK)
-        elements.Append(self.ID_SHOW_AXIS, 'Show Axis', '', wx.ITEM_CHECK)
-        elements.AppendSeparator()
-        elements.Append(self.ID_SHOW_HORZ_BAR, 'Show Horz Bar\tshift+h', '',
-                        wx.ITEM_CHECK)
-        elements.Append(self.ID_SHOW_VERT_BAR, 'Show Vert Bar\tshift+v', '',
+        menu.Append(self.ID_SHOW_2D, 'Show 2D Mode', '', wx.ITEM_CHECK)
+        menu.AppendSeparator()
+        menu.Append(self.ID_SHOW_STEP_SURFACE, 'Step Surface', '',
+                wx.ITEM_CHECK)
+        menu.Append(self.ID_SHOW_TRIANGLE, 'Show Surface\tshift+s', '',
+                wx.ITEM_CHECK)
+        menu.Append(self.ID_SHOW_MESH, 'Show Mesh', '', wx.ITEM_CHECK)
+        menu.AppendSeparator()
+        menu.Append(self.ID_SHOW_CONTOUR, 'Show Contour', '',
+                wx.ITEM_CHECK)
+        menu.Append(self.ID_SHOW_BOX, 'Show Box', '', wx.ITEM_CHECK)
+        menu.Append(self.ID_SHOW_AXIS, 'Show Axis', '', wx.ITEM_CHECK)
+        menu.AppendSeparator()
+        menu.Append(self.ID_SHOW_HORZ_BAR, 'Show Horz Bar\tshift+h', '',
+                wx.ITEM_CHECK)
+        menu.Append(self.ID_SHOW_VERT_BAR, 'Show Vert Bar\tshift+v', '',
                         wx.ITEM_CHECK)
 
+        return menu
+
+    def GetContextMenu(self):
+        menu = wx.Menu()
+        elements = self.BuildElementMenu()
         menu.AppendSubMenu(elements, 'Elements')
         rotate = wx.Menu()
         rotate.Append(self.ID_ROTATE_0, 'Rotate 0 degree', '', wx.ITEM_CHECK)
@@ -293,6 +299,16 @@ class SurfaceBase(glcanvas.GLCanvas):
         menu.AppendSeparator()
         menu.AppendSubMenu(rotate, 'Orientation')
         return menu
+
+    def SetHudTextClr(self, clr):
+        self.hudtext_clr = clr
+        self._hudtext = ''
+        self.Refresh()
+
+    def SetHudTextFont(self, font):
+        self.hudtext_font = font
+        self._hudtext = ''
+        self.Refresh()
 
     def SetSurfaceBackground(self, clr):
         self.background_color = clr
@@ -412,10 +428,12 @@ class SurfaceBase(glcanvas.GLCanvas):
         return self.margin
 
     def Resize(self):
+        self.SetCurrent(self.context)
         sz = self.GetClientSize()
         self.W = sz.x
         self.H = sz.y
-        glViewport(0, 0, self.W, self.H)
+        scale = self.GetContentScaleFactor()
+        glViewport(0, 0, int(self.W*scale), int(self.H*scale))
         xmax, xmin = self.range['xmax'], self.range['xmin']
         ymax, ymin = self.range['ymax'], self.range['ymin']
         if self.default_rotate in [90, 270]:
@@ -438,13 +456,15 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def OnPaint(self, event):
         dc = wx.PaintDC(self)
-        if self.raw_points is None:
-            return
         self.SetCurrent(self.context)
-        if not self.initialized:
-            self.initialized = True
-            self.Initialize()
-        self.Draw()
+        if self.raw_points is None:
+            glClearColor(*self.background_color)
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        else:
+            if not self.initialized:
+                self.initialized = True
+                self.Initialize()
+            self.Draw()
 
         # save the buffer
         view = glGetIntegerv(GL_VIEWPORT)
@@ -461,8 +481,6 @@ class SurfaceBase(glcanvas.GLCanvas):
             self.ResetRotate()
 
     def InitGL(self):
-        self.SetCurrent(self.context)
-
         glClearColor(1.0, 1.0, 1.0, 1.0)  # this is the color
         glEnable(GL_DEPTH_TEST)  # Enable Depth Testing
         glDepthFunc(GL_LEQUAL)  # Set Perspective View
@@ -1435,16 +1453,22 @@ class SurfaceBase(glcanvas.GLCanvas):
             bitmap.SetScaleFactor(scale)
             tdc.SelectObject(bitmap)
             gc = wx.GraphicsContext.Create(tdc)
-            font = wx.Font(14, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL,
-                           wx.FONTWEIGHT_NORMAL)
-            gc.SetFont(font, wx.WHITE)
+            if wx.Platform == '__WXMSW__':
+                gc.SetBrush(wx.Brush(np.array(self.background_color)*255))
+                gc.DrawRectangle(0, 0, HudW, HudH)
+            gc.SetFont(self.hudtext_font, self.hudtext_clr)
             gc.DrawText(letter, 5, 5)
             tdc.SelectObject(wx.NullBitmap)
             self._hudBuffer = np.zeros((HudW, HudH, 4), np.uint8)
             bitmap.CopyToBuffer(self._hudBuffer, wx.BitmapBufferFormat_RGBA)
             if wx.Platform == '__WXMSW__':
                 # remove black background in windows by setting the corresponding alpha channel to 0
-                self._hudBuffer[:, :, -1] = self._hudBuffer[:, :, 0]
+                bk = ((self._hudBuffer[:, :, 0] == self.background_color[0]*255) &
+                     (self._hudBuffer[:, :, 1] == self.background_color[1]*255) &
+                     (self._hudBuffer[:, :, 2] == self.background_color[2]*255) &
+                     (self._hudBuffer[:, :, 3] == self.background_color[3]*255))
+                self._hudBuffer[bk, -1] = 0
+
         texture = self.glTextures[1]
         glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
         glBindTexture(GL_TEXTURE_2D, texture)
@@ -1537,7 +1561,11 @@ class SelectedPixelBuf(object):
         if self.range == rng:
             return
         self.range.update(rng)
-        self.Resize(self.buf_size)
+        self.InitVertex()
+
+    def InitVertex(self):
+        # make z value larger than zmax, so it shows on top of the surface.
+        self.vertex = np.ones((self.buf_size, 3)) * self.range['zmax'] * 2.0
 
     def SetColor(self, clr):
         if self.line_color == clr:
@@ -1550,8 +1578,7 @@ class SelectedPixelBuf(object):
     def Resize(self, sz):
         self.buf_size = sz
         self.buf = np.zeros(sz)
-        # make z value larger than zmax, so it shows on top of the surface.
-        self.vertex = np.ones((sz, 3)) * self.range['zmax'] * 2.0
+        self.InitVertex()
         self.color = np.repeat(np.array([self.line_color]), sz,
                                axis=0).flatten()
         self.line = np.arange(sz)
@@ -1585,9 +1612,10 @@ class TrackingSurface(SurfaceBase):
     ID_DISP_MIN = wx.NewIdRef()
     ID_DISP_MINMAX = wx.NewIdRef()
     ID_AUTO_SCALE = wx.NewIdRef()
+    ID_SHOW_SELECTED_BUF = wx.NewIdRef()
 
     def __init__(self, parent, points=None, buf_len=256):
-        SurfaceBase.__init__(self, parent, points)
+        super().__init__(parent, points)
         self.buf_len = buf_len
         self.frames = None
         self.frames_idx = 0
@@ -1596,12 +1624,10 @@ class TrackingSurface(SurfaceBase):
         self.selected_buf = None
         self.SetBufLen(self.buf_len)
 
-    def Initialize(self):
-        #self.SetBufLen(self.buf_len)
-        super(TrackingSurface, self).Initialize()
+        self.show['selected_buf'] = True
 
     def GetAccelList(self):
-        accel_tbl = super(TrackingSurface, self).GetAccelList()
+        accel_tbl = super().GetAccelList()
         accel_tbl += [(wx.ACCEL_CTRL, ord('K'), self.ID_SIM_CLEAR),
                       (wx.ACCEL_SHIFT, ord('M'), self.ID_DISP_MAX),
                       (wx.ACCEL_SHIFT, ord('O'), self.ID_DISP_ORIGINAL),
@@ -1622,7 +1648,7 @@ class TrackingSurface(SurfaceBase):
         return self.buf_len
 
     def SetRange(self, rng):
-        super(TrackingSurface, self).SetRange(rng)
+        super().SetRange(rng)
         if self.selected_buf:
             self.selected_buf.SetRange(rng)
 
@@ -1728,12 +1754,12 @@ class TrackingSurface(SurfaceBase):
         super().Clear()
 
     def Draw(self):
-        super(TrackingSurface, self).Draw()
+        super().Draw()
         if not self.frames is None:
             self.DrawSelectedBuf()
 
     def DrawSelectedBuf(self):
-        if self.frames is None:
+        if self.frames is None or not self.show.get('selected_buf', False):
             return
         xmax, xmin = self.range['xmax'], self.range['xmin']
         ymax, ymin = self.range['ymax'], self.range['ymin']
@@ -1754,8 +1780,15 @@ class TrackingSurface(SurfaceBase):
             self.SetGLBuffer(v, c)
             self.DrawElement(GL_LINE_STRIP, l, 0, 2)
 
+    def BuildElementMenu(self):
+        menu = super().BuildElementMenu()
+        menu.AppendSeparator()
+        menu.Append(self.ID_SHOW_SELECTED_BUF, 'Show line of selected pixel', '', wx.ITEM_CHECK)
+
+        return menu
+
     def GetContextMenu(self):
-        menu = super(TrackingSurface, self).GetContextMenu()
+        menu = super().GetContextMenu()
         if not menu:
             menu = wx.Menu()
             menu.Append(self.ID_AUTO_SCALE, 'Auto scale\tshift+ctrl+A')
@@ -1784,8 +1817,10 @@ class TrackingSurface(SurfaceBase):
             event.Check(self.display_mode == self.DISPLAY_MIN)
         elif eid == self.ID_DISP_MINMAX:
             event.Check(self.display_mode == self.DISPLAY_MINMAX)
+        elif eid == self.ID_SHOW_SELECTED_BUF:
+            event.Check(self.show['selected_buf'])
         else:
-            super(TrackingSurface, self).OnUpdateMenu(event)
+            super().OnUpdateMenu(event)
 
     def OnProcessMenuEvent(self, event):
         eid = event.GetId()
@@ -1801,5 +1836,7 @@ class TrackingSurface(SurfaceBase):
             self.display_mode = self.DISPLAY_MINMAX
         elif eid == self.ID_AUTO_SCALE:
             self.SetImage(self.raw_points)
+        elif eid == self.ID_SHOW_SELECTED_BUF:
+            self.SetShowMode(selected_buf=not self.show['selected_buf'])
         else:
-            super(TrackingSurface, self).OnProcessMenuEvent(event)
+            super().OnProcessMenuEvent(event)
