@@ -1,10 +1,7 @@
-#!/usr/bin/env python
-
-import wx
-import sys
 import math
 import six
 import numpy as np
+import wx
 from wx import glcanvas
 import OpenGL
 OpenGL.ERROR_CHECKING = False
@@ -64,12 +61,15 @@ void main(void) {
 
 
 class SimpleBarBuf(object):
-    def __init__(self, sz, rng, horz, clr=[0, 0.6, 0, 1]):
+    def __init__(self, sz, rng, horz, clr=(0, 0.6, 0, 1)):
         self.horz = horz
         self.range = dict(rng)
         self.bar_color = clr[:]
         self.buf_size = -1
         self.Resize(sz)
+        self.bar_color = None
+        self.color = []
+        self.SetColor(clr)
 
     def SetRange(self, rng):
         if rng == self.range:
@@ -85,8 +85,8 @@ class SimpleBarBuf(object):
             self.color = np.repeat(np.array([clr]), self.buf_size * 4,
                                    axis=0).flatten()
 
-    def Resize(self, sz):
-        if sz == self.buf_size:
+    def Resize(self, sz, forced=True):
+        if sz == self.buf_size and not forced:
             return
         self.buf_size = sz
         zmax = self.range['zmax']
@@ -182,6 +182,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.color_scale = []
         self.blocks = []
         self.data_zscale = 1
+        self.data_zscale_bar = 1 # the scale for the horz/vert bar
         # 2d mode is the fast-drawing mode, only shows the 2D image
         self.mode_2d = False
         self.show = {
@@ -718,12 +719,16 @@ class SurfaceBase(glcanvas.GLCanvas):
         xmax, xmin = self.range['xmax'], self.range['xmin']
         ymax, ymin = self.range['ymax'], self.range['ymin']
         rng = max(ymax - ymin, xmax - xmin)
+        rng_min = min(ymax - ymin, xmax - xmin)
         # scale the z data, such that it has similar span as x or y axis.
         # otherwise, when rotate the image, the projection of z on x or y axis
         # will not look good (e.g., too small or too large).
         zscale = 1
+        zscale_bar = 1
         if zmax - zmin > 0 and rng > 0:
             zscale = float(rng) / (zmax - zmin)
+            zscale_bar = float(rng_min) / (zmax - zmin)
+        self.data_zscale_bar = zscale_bar
         self.SetDataScaleZ(zscale)
 
     def SetRangeZ(self, zrange):
@@ -792,8 +797,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.raw_points['z'] = points
         self.UpdateHudText()
         rows, cols = points.shape
-        self.horzbar_buf.Resize(cols)
-        self.vertbar_buf.Resize(rows)
+        self.horzbar_buf.Resize(cols, forced=False)
+        self.vertbar_buf.Resize(rows, forced=False)
 
         self.Pz[0:rows, 0:cols] = points
         self.Pz[-1, :] = self.Pz[-2, :]
@@ -1353,7 +1358,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             if y < 0 or y >= self.raw_points['z'].shape[0]:
                 # out of range
                 return
-            d = self.raw_points['z'][y, :] * self.data_zscale
+            d = (self.raw_points['z'][y, :] - self.range['zmin']) * self.data_zscale_bar
             self.horzbar_buf.SetData(d)
             v, c, l = self.horzbar_buf.GetGLObject()
             self.SetGLBuffer(v, c)
@@ -1364,7 +1369,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             if x < 0 or x >= self.raw_points['z'].shape[1]:
                 # out of range
                 return
-            d = self.raw_points['z'][:, x] * self.data_zscale
+            d = (self.raw_points['z'][:, x] - self.range['zmin']) * self.data_zscale_bar
             self.vertbar_buf.SetData(d)
             v, c, l = self.vertbar_buf.GetGLObject()
 
