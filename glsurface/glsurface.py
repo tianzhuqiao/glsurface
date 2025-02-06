@@ -538,7 +538,6 @@ class SurfaceBase(glcanvas.GLCanvas):
         return None
 
     def OnKeyDown(self, event):
-        event.Skip()
         if event.ShiftDown():
             if self.mode_2d:
                 event.Skip()
