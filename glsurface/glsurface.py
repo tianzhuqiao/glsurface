@@ -407,8 +407,10 @@ class SurfaceBase(glcanvas.GLCanvas):
             event.Check(self.mode_2d)
         elif eid == self.ID_SHOW_STEP_SURFACE:
             event.Check(self.GetShowStepSurface())
+            event.Enable(not self.mode_2d)
         elif eid == self.ID_SHOW_TRIANGLE:
             event.Check(self.show['surface'])
+            event.Enable(not self.mode_2d)
         elif eid == self.ID_SHOW_MESH:
             event.Check(self.show['mesh'])
             event.Enable(not self.mode_2d)
