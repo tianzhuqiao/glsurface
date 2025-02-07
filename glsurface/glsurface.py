@@ -208,6 +208,11 @@ class SurfaceBase(glcanvas.GLCanvas):
         self._hudBuffer = np.zeros((0, 0, 4))
         self.hudtext_clr = wx.WHITE
         self.hudtext_font = wx.Font(14, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+        self.axis_clr = (1, 1, 1, 1)
+        self.axistext_clr = wx.WHITE
+        self.axistext_font = wx.Font(14, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD)
+        self.box_clr = (1, 1, 1, 1)
+
         # buffers to draw bar
         if self.raw_points is not None and 'z' in self.raw_points:
             rows, cols = self.raw_points['z'].shape
@@ -220,7 +225,6 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.pixels_size = (0, 0)
 
         self.background_color = [0, 0, 0, 1]
-        self.SetBackgroundColour(np.array(self.background_color)*255)
 
         # Ugly. do not call SetImage or similar methods here, since it may be
         # overridden or may call some overridden methods. Instead, it should be
@@ -310,9 +314,21 @@ class SurfaceBase(glcanvas.GLCanvas):
         self._hudtext = ''
         self.Refresh()
 
+    def SetBoxClr(self, clr):
+        self.box_clr = clr
+        self.Refresh()
+
+    def SetAxisClr(self, clr, clr_text):
+        self.axis_clr = clr
+        self.axistext_clr = clr_text
+        self.Refresh()
+
+    def SetAxisTextFont(self, font):
+        self.axistext_font = font
+        self.Refresh()
+
     def SetSurfaceBackground(self, clr):
         self.background_color = clr
-        self.SetBackgroundColour(clr)
         self.Refresh()
 
     def GetSurfaceBackground(self):
@@ -1196,12 +1212,15 @@ class SurfaceBase(glcanvas.GLCanvas):
     def DrawAxis(self):
         r = self.range
         scale = self.GetContentScaleFactor()
-        gx = 32 / self.scale['base']
-        rx = r['xmax'] - r['xmin']
-        if rx <= 0:
+        g = 32 / self.scale['base']
+        rng = max(r['xmax'] - r['xmin'], r['ymax'] - r['ymin'])
+        rng_min = min(r['xmax'] - r['xmin'], r['ymax'] - r['ymin'])
+        if rng <= 0:
             return
-        gy = gx / rx * (r['ymax'] - r['ymin'])
-        gz = gx / rx * (r['zmax'] - r['zmin'])
+        gy = g / rng * rng_min
+        gx = gy
+        gz = gx / rng * (r['zmax'] - r['zmin'])
+
         p = [r['xmax'], r['ymax'], r['zmax']]
         vertex = np.array([
             p[0] - gx, p[1], p[2], p[0] - gx, p[1] - gy, p[2], p[0], p[1] - gy,
@@ -1210,6 +1229,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             p[2]
         ])
         self.DrawAxisHelp('x', vertex)
+
         p = [r['xmin'], r['ymax'], r['zmax']]
         vertex = np.array([
             p[0], p[1], p[2], p[0], p[1] - gy, p[2], p[0] + gx, p[1] - gy,
@@ -1218,6 +1238,7 @@ class SurfaceBase(glcanvas.GLCanvas):
             p[1] - gy / 3, p[2]
         ])
         self.DrawAxisHelp('y', vertex)
+
         p = [r['xmin'], r['ymin'], r['zmax']]
         vertex = np.array([
             p[0], p[1] + gy, p[2] - gz, p[0], p[1], p[2] - gz, p[0], p[1],
@@ -1228,32 +1249,15 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.DrawAxisHelp('z', vertex)
 
     def DrawAxisHelp(self, letter, vertex):
-        scale = self.GetContentScaleFactor()*self.scale['base']
+        scale = self.GetContentScaleFactor()*self.scale['base']*self.scale['zoom']
         W, H = int(32*scale), int(32*scale)
-        bitmap = wx.Bitmap(W, H, depth=32)
-        bitmap.SetScaleFactor(scale)
-        tdc = wx.MemoryDC()
-        tdc.SelectObject(bitmap)
-        gc = wx.GraphicsContext.Create(tdc)
-        font = wx.Font(14, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL,
-                       wx.FONTWEIGHT_NORMAL)
-        gc.SetFont(font, wx.WHITE)
-        tw, th = gc.GetTextExtent(letter)
-        if wx.Platform == '__WXMSW__':
-            # in windows, tw, th is after scale
-            gc.DrawText(letter, (W-tw)//2, (H-th)//2)
-        else:
-            gc.DrawText(letter, (32-tw)//2, (32-th)//2)
-        tdc.SelectObject(wx.NullBitmap)
 
+        mybuffer = self.DrawTextToBuffer(letter, (W, H), self.axistext_font,
+                                         self.axistext_clr, align_center=True,
+                                         scale=2*self.scale['base']*self.scale['zoom'])
         texture = self.glTextures[0]
         glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
         glBindTexture(GL_TEXTURE_2D, texture)
-        mybuffer = np.zeros((W, H, 4), np.uint8)
-        bitmap.CopyToBuffer(mybuffer, wx.BitmapBufferFormat_RGBA)
-        if wx.Platform == '__WXMSW__':
-            # remove black background in windows by setting the corresponding alpha channel to 0
-            mybuffer[:, :, -1] = mybuffer[:, :, 0]
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, W, H, 0, GL_RGBA,
                      GL_UNSIGNED_BYTE, mybuffer.flatten())
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
@@ -1267,9 +1271,16 @@ class SurfaceBase(glcanvas.GLCanvas):
         glBindTexture(GL_TEXTURE_2D, texture)
 
         color = np.array([
-            0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1
-        ])
+            [0, 1, 0, 1],
+            [0, 0, 0, 1],
+            [1, 0, 0, 1],
+            [1, 1, 0, 1],
+            self.axis_clr,
+            self.axis_clr,
+            self.axis_clr,
+            self.axis_clr,
+        ]).flatten()
+
         triangle = np.array([0, 1, 2, 3])
         mesh = np.array([4, 5, 5, 6, 5, 7])
         glUniform1i(glGetUniformLocation(self.ShaderProgram, "uSampler"), 0)
@@ -1298,7 +1309,6 @@ class SurfaceBase(glcanvas.GLCanvas):
                     ctr = obj['Contour'][b]
                     for c in range(len(ctr['Vertices'])):
                         self.SetGLBuffer(ctr['Vertices'][c], ctr['Color'][c])
-                        print(type(ctr['Mesh'][c]))
                         self.DrawElement(GL_LINES, ctr['Mesh'][c], 0)
 
     def Draw2dImg(self):
@@ -1354,10 +1364,7 @@ class SurfaceBase(glcanvas.GLCanvas):
                 r['xmin'], r['ymax'], r['zmax'], r['xmax'], r['ymax'],
                 r['zmax'], r['xmax'], r['ymin'], r['zmax']
             ])
-            color = np.array([
-                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
-            ])
+            color = np.tile(self.box_clr, 8)
             axis = np.array([
                 0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2,
                 6, 3, 7
@@ -1437,6 +1444,42 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.DrawBar()
         self.DrawHud()
 
+    def DrawTextToBuffer(self, text, sz, font, clr, align_center=False, pos=(5,5), scale=1):
+
+        tdc = wx.MemoryDC()
+        bitmap = wx.Bitmap(sz[0], sz[1], depth=32)
+        scale = self.GetContentScaleFactor() * scale
+        bitmap.SetScaleFactor(scale)
+        tdc.SelectObject(bitmap)
+        gc = wx.GraphicsContext.Create(tdc)
+        if wx.Platform == '__WXMSW__':
+            gc.SetBrush(wx.Brush(np.array(self.background_color)*255))
+            gc.DrawRectangle(0, 0, sz[0], sz[1])
+        gc.SetFont(font, clr)
+
+        if align_center:
+            tw, th = gc.GetTextExtent(text)
+            if wx.Platform == '__WXMSW__':
+                # in windows, tw, th is after scale
+                gc.DrawText(text, (sz[0]-tw)//2, (sz[1]-th)//2)
+            else:
+                gc.DrawText(text, int(sz[0]/scale-tw)//2, int(sz[1]/scale-th)//2)
+        else:
+            gc.DrawText(text, pos[0], pos[0])
+
+        tdc.SelectObject(wx.NullBitmap)
+        buffer = np.zeros((sz[0], sz[1], 4), np.uint8)
+        bitmap.CopyToBuffer(buffer, wx.BitmapBufferFormat_RGBA)
+        if wx.Platform == '__WXMSW__':
+            # remove black background in windows by setting the corresponding alpha channel to 0
+            bk = ((buffer[:, :, 0] == self.background_color[0]*255) &
+                  (buffer[:, :, 1] == self.background_color[1]*255) &
+                  (buffer[:, :, 2] == self.background_color[2]*255) &
+                  (buffer[:, :, 3] == self.background_color[3]*255))
+            buffer[bk, -1] = 0
+
+        return buffer
+
     def DrawHud(self):
         if not self._hudtext and not self.hudtext:
             return
@@ -1446,27 +1489,9 @@ class SurfaceBase(glcanvas.GLCanvas):
         if self._hudtext != self.hudtext or HudW < W:
             self._hudtext = self.hudtext
             letter = self.hudtext
-            tdc = wx.MemoryDC()
             HudW, HudH = W, int(38*scale)
-            bitmap = wx.Bitmap(HudW, HudH, depth=32)
-            bitmap.SetScaleFactor(scale)
-            tdc.SelectObject(bitmap)
-            gc = wx.GraphicsContext.Create(tdc)
-            if wx.Platform == '__WXMSW__':
-                gc.SetBrush(wx.Brush(np.array(self.background_color)*255))
-                gc.DrawRectangle(0, 0, HudW, HudH)
-            gc.SetFont(self.hudtext_font, self.hudtext_clr)
-            gc.DrawText(letter, 5, 5)
-            tdc.SelectObject(wx.NullBitmap)
-            self._hudBuffer = np.zeros((HudW, HudH, 4), np.uint8)
-            bitmap.CopyToBuffer(self._hudBuffer, wx.BitmapBufferFormat_RGBA)
-            if wx.Platform == '__WXMSW__':
-                # remove black background in windows by setting the corresponding alpha channel to 0
-                bk = ((self._hudBuffer[:, :, 0] == self.background_color[0]*255) &
-                     (self._hudBuffer[:, :, 1] == self.background_color[1]*255) &
-                     (self._hudBuffer[:, :, 2] == self.background_color[2]*255) &
-                     (self._hudBuffer[:, :, 3] == self.background_color[3]*255))
-                self._hudBuffer[bk, -1] = 0
+            self._hudBuffer = self.DrawTextToBuffer(letter, (HudW, HudH),
+                                                    self.hudtext_font, self.hudtext_clr)
 
         texture = self.glTextures[1]
         glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
@@ -1553,7 +1578,11 @@ class SelectedPixelBuf(object):
         self.idx = 0
         self.range = dict(rng)
         self.line_color = [1., 1., 1., 1.]
+        self.sel_color = [1, 0, 0, 1]
+        self.sel_pos = 0
         self.buf_size = -1
+        self.color = None
+        self.vertex = None
         self.Resize(sz)
 
     def SetRange(self, rng):
@@ -1566,13 +1595,15 @@ class SelectedPixelBuf(object):
         # make z value larger than zmax, so it shows on top of the surface.
         self.vertex = np.ones((self.buf_size, 3)) * self.range['zmax'] * 2.0
 
-    def SetColor(self, clr):
-        if self.line_color == clr:
+    def SetColor(self, clr, clr_sel=None):
+        if self.line_color == clr and self.sel_color == clr_sel:
             return
         self.line_color = clr[:]
+        self.sel_color = clr_sel[:]
         if self.buf_size > 0:
             self.color = np.repeat(np.array([clr]), self.buf_size,
                                    axis=0).flatten()
+            self.SetSelectedPos(self.sel_pos)
 
     def Resize(self, sz):
         self.buf_size = sz
@@ -1590,10 +1621,16 @@ class SelectedPixelBuf(object):
 
     def SetSelectedPos(self, pos):
         # pos is within [-self.buf.size+1, 0]
-        self.color.fill(1)
-        pos = (self.buf.size - 1 + pos) % self.buf.size
-        if pos >= 0 and pos < self.buf.size:
-            self.color[pos * 4:(pos + 1) * 4] = [1, 0, 0, 1]
+        def _set_pos_clr(p, clr):
+            p = (self.buf.size - 1 + p) % self.buf.size
+            if p >=0 and p < self.buf_size:
+                self.color[p * 4:(p + 1) * 4] = clr
+
+        if pos != self.sel_pos:
+            _set_pos_clr(self.sel_pos, self.line_color)
+        self.sel_pos = pos
+
+        _set_pos_clr(pos, self.sel_color)
 
     def SetData(self, d, idx):
         self.idx = idx
