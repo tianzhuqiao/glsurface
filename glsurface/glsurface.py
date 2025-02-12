@@ -456,7 +456,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         ymax, ymin = self.range['ymax'], self.range['ymin']
         if self.default_rotate in [90, 270]:
             xmax, xmin, ymax, ymin = ymax, ymin, xmax, xmin
-        if xmax - xmin > 0 and ymax - ymin >= 0:
+        if xmax - xmin > 0 and ymax - ymin > 0:
             t, b = self.margin['top'], self.margin['bottom']
             l, r = self.margin['left'], self.margin['right']
             self.scale['base'] = min((self.W - l - r) / (xmax - xmin),
@@ -660,6 +660,8 @@ class SurfaceBase(glcanvas.GLCanvas):
     def OnMouseWheel(self, event):
         delta = (event.GetWheelRotation() > 0) * 2 - 1
         bRect = self.GetClientRect()
+        if bRect.width <= 0 or bRect.height <= 0:
+            return
         pos = event.GetPosition()
         x = (pos.x - bRect.left) * ((self.W) / bRect.width)
         y = (pos.y - bRect.top) * ((self.H) / bRect.height)
@@ -1322,6 +1324,8 @@ class SurfaceBase(glcanvas.GLCanvas):
 
         W = self.dimension['x']
         H = self.dimension['y']
+        if W <= 0 or H <= 0:
+            return
         #if self.img_texture is None:
         glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
         glBindTexture(GL_TEXTURE_2D, self.glTextures[2])
@@ -1487,6 +1491,8 @@ class SurfaceBase(glcanvas.GLCanvas):
             return
         scale = self.GetContentScaleFactor()
         W, H = int(self.W*scale), int(self.H*scale)
+        if W <= 0 or H <= 0:
+            return
         HudW, HudH = self._hudBuffer.shape[0:2]
         if self._hudtext != self.hudtext or HudW < W:
             self._hudtext = self.hudtext
