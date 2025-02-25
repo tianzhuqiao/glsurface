@@ -138,18 +138,19 @@ class SurfaceBase(glcanvas.GLCanvas):
     ID_SHOW_AXIS = wx.NewIdRef()
     ID_SHOW_HORZ_BAR = wx.NewIdRef()
     ID_SHOW_VERT_BAR = wx.NewIdRef()
+    ID_SHOW_HUDTEXT = wx.NewIdRef()
     ID_ROTATE_0 = wx.NewIdRef()
     ID_ROTATE_90 = wx.NewIdRef()
     ID_ROTATE_180 = wx.NewIdRef()
     ID_ROTATE_270 = wx.NewIdRef()
 
-    def __init__(self, parent, points=None):
-        # set the depth size, otherwise the depth test may not work correctly.
-        attribs = [
-            glcanvas.WX_GL_RGBA, glcanvas.WX_GL_DOUBLEBUFFER,
-            glcanvas.WX_GL_DEPTH_SIZE, 16
-        ]
-        glcanvas.GLCanvas.__init__(self, parent, -1, attribList=attribs)
+    def __init__(self, parent, points=None, dispAttrs=None):
+        if dispAttrs is None:
+            dispAttrs = glcanvas.GLAttributes()
+            # set the depth size, otherwise the depth test may not work correctly.
+            dispAttrs.PlatformDefaults().RGBA().DoubleBuffer().Depth(16).EndList()
+
+        glcanvas.GLCanvas.__init__(self, parent, dispAttrs=dispAttrs)
         self.context = glcanvas.GLContext(self)
 
         self.drag_start = wx.Point(0, 0)
@@ -173,9 +174,9 @@ class SurfaceBase(glcanvas.GLCanvas):
             'zmax': 1
         }
         self.zrange = []
-        self.scale = {'base': 1, 'zoom': 1}
+        self.scale = {'base': 1, 'zoom_x': 1, 'zoom_y': 1}
         self.rotate_delta = 0.05
-        self.margin = {'top': 50, 'bottom': 10, 'left': 1, 'right': 1}
+        self.margin = {'top': 10, 'bottom': 10, 'left': 1, 'right': 1}
         self.offset = {'base': {'x': 0, 'y': 0}, 'user': {'x': 0, 'y': 0}}
         self.data_offset = {'x': 0, 'y': 0, 'z': 0}
         self.selected = {'x': 0, 'y': 0, 'clr': [1, 0, 1, 1]}
@@ -192,7 +193,8 @@ class SurfaceBase(glcanvas.GLCanvas):
             'box': False,
             'axis': False,
             'horz_bar': False,
-            'vert_bar': False
+            'vert_bar': False,
+            'hudtext': True
         }
         self.show_step_surface = True
         self.contour_levels = 100
@@ -249,6 +251,7 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def Clear(self):
         self.raw_points = None
+        self.globjects = None
         self.Refresh()
 
     def GetAccelList(self):
@@ -281,6 +284,8 @@ class SurfaceBase(glcanvas.GLCanvas):
                 wx.ITEM_CHECK)
         menu.Append(self.ID_SHOW_BOX, 'Show Box', '', wx.ITEM_CHECK)
         menu.Append(self.ID_SHOW_AXIS, 'Show Axis', '', wx.ITEM_CHECK)
+        menu.AppendSeparator()
+        menu.Append(self.ID_SHOW_HUDTEXT, 'Show Hud Text', '', wx.ITEM_CHECK)
         menu.AppendSeparator()
         menu.Append(self.ID_SHOW_HORZ_BAR, 'Show Horz Bar\tshift+h', '',
                 wx.ITEM_CHECK)
@@ -381,6 +386,8 @@ class SurfaceBase(glcanvas.GLCanvas):
             show['box'] = not self.show['box']
         elif eid == self.ID_SHOW_AXIS:
             show['axis'] = not self.show['axis']
+        elif eid == self.ID_SHOW_HUDTEXT:
+            show['hudtext'] = not self.show['hudtext']
         elif eid == self.ID_SHOW_HORZ_BAR:
             show['horz_bar'] = not self.show['horz_bar']
         elif eid == self.ID_SHOW_VERT_BAR:
@@ -400,6 +407,8 @@ class SurfaceBase(glcanvas.GLCanvas):
             return
         if show:
             self.SetShowMode(**show)
+            if 'hudtext' in show:
+                self.Resize()
 
     def OnUpdateMenu(self, event):
         eid = event.GetId()
@@ -423,6 +432,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         elif eid == self.ID_SHOW_AXIS:
             event.Check(self.show['axis'])
             event.Enable(not self.mode_2d)
+        elif eid == self.ID_SHOW_HUDTEXT:
+            event.Check(self.show['hudtext'])
         elif eid == self.ID_SHOW_HORZ_BAR:
             event.Check(self.show['horz_bar'])
         elif eid == self.ID_SHOW_VERT_BAR:
@@ -459,6 +470,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         if xmax - xmin > 0 and ymax - ymin > 0:
             t, b = self.margin['top'], self.margin['bottom']
             l, r = self.margin['left'], self.margin['right']
+            if self.show['hudtext']:
+                t += 40
             self.scale['base'] = min((self.W - l - r) / (xmax - xmin),
                                      (self.H - t - b) / (ymax - ymin))
             self.offset['base'] = {
@@ -472,10 +485,13 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.Refresh()
         event.Skip()
 
+    def _has_anything_to_draw(self):
+        return self.raw_points is not None or self.globjects
+
     def OnPaint(self, event):
         dc = wx.PaintDC(self)
         self.SetCurrent(self.context)
-        if self.raw_points is None:
+        if not self._has_anything_to_draw():
             glClearColor(*self.background_color)
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         else:
@@ -666,12 +682,20 @@ class SurfaceBase(glcanvas.GLCanvas):
         x = (pos.x - bRect.left) * ((self.W) / bRect.width)
         y = (pos.y - bRect.top) * ((self.H) / bRect.height)
         if delta:
-            zoom = 1.1**delta
-            self.scale['zoom'] *= zoom
+            zoom_x = 1.1**delta
+            zoom_y = 1.1**delta
+            if event.ShiftDown():
+                # shift down, only y-axis
+                zoom_x = 1
+            if event.CmdDown():
+                # cmd down, only x-axis
+                zoom_y = 1
+            self.scale['zoom_x'] *= zoom_x
+            self.scale['zoom_y'] *= zoom_y
             base = self.offset['base']
             user = self.offset['user']
-            user['x'] = x - (x - base['x'] - user['x']) * zoom - base['x']
-            user['y'] = y - (y - base['y'] - user['y']) * zoom - base['y']
+            user['x'] = x - (x - base['x'] - user['x']) * zoom_x - base['x']
+            user['y'] = y - (y - base['y'] - user['y']) * zoom_y - base['y']
             self.Refresh()
 
         event.Skip()
@@ -680,16 +704,21 @@ class SurfaceBase(glcanvas.GLCanvas):
         # reset rotation, zoom, offset
         self.rotation = {'x': 0, 'y': 0, 'z': 0}
         self.rotate_matrix = np.eye(3, dtype=np.float32)
-        self.scale['zoom'] = 1
+        self.scale['zoom_x'] = 1
+        self.scale['zoom_y'] = 1
         self.offset['user'] = {'x': 0, 'y': 0}
         # set the default orientation
         self.Rotate(0, 0,
                     self.default_rotate / 180. * np.pi / self.rotate_delta)
 
-    def GetColorByZ(self, z):
-        zMin = self.range['zmin']
-        zMax = self.range['zmax']
-        scale = self.data_zscale
+    def GetColorByZ(self, z, zmin=None, zmax=None):
+        zMin = zmin
+        if zMin is None:
+            zMin = self.range['zmin']
+        zMax = zmax
+        if zMax is None:
+            zMax = self.range['zmax']
+        scale = 1
         if zMax - zMin > 0:
             scale = 1 / (zMax - zMin)
         offset = 0
@@ -708,6 +737,8 @@ class SurfaceBase(glcanvas.GLCanvas):
             (C[norm_p_r, :] - C[norm_p_l, :]).T) * norm_p_d).T
 
     def Colorize(self):
+        if self.points is None or len(self.points) <= 0:
+            return
         self.pointsClr = self.GetColorByZ(self.points[:, 2])
         sel = self.selected['x'] * self.dimension['y'] + self.selected['y']
         if sel >= 0 and sel < self.points.shape[0]:
@@ -734,7 +765,14 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def SetRange(self, rng):
         self.range.update(rng)
-        #self.SetRangeZ(self.zrange)
+
+        xmin, xmax = self.range['xmin'], self.range['xmax']
+        ymin, ymax = self.range['ymin'], self.range['ymax']
+        zmin, zmax = self.range['zmin'], self.range['zmax']
+        self.data_offset['x'] = (xmax + xmin) / 2
+        self.data_offset['y'] = (ymax + ymin) / 2
+        self.data_offset['z'] = (zmax + zmin) / 2
+
         self.horzbar_buf.SetRange(self.range)
         self.vertbar_buf.SetRange(self.range)
         self.Resize()
@@ -745,14 +783,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         return self.range
 
     def _UpdateDataSacleZ(self):
-        if len(self.zrange) == 2:
-            zmin, zmax = self.zrange
-        elif self.raw_points:
-            z = self.raw_points['z']
-            zmin, zmax = np.min(z), np.max(z)
-        else:
-            zmin, zmax = 0, 1
-        self.data_offset['z'] = (zmax + zmin) / 2
+        zmax, zmin = self.range['zmax'], self.range['zmin']
         xmax, xmin = self.range['xmax'], self.range['xmin']
         ymax, ymin = self.range['ymax'], self.range['ymin']
         rng = max(ymax - ymin, xmax - xmin)
@@ -911,9 +942,6 @@ class SurfaceBase(glcanvas.GLCanvas):
         xmax, ymax, zmax = np.max(Px), np.max(Py), np.max(self.Pz)
         if self.zrange:
             zmin, zmax = self.zrange
-        self.data_offset['x'] = (xmax + xmin) / 2
-        self.data_offset['y'] = (ymax + ymin) / 2
-        self.data_offset['z'] = (zmax + zmin) / 2
 
         self.points = np.zeros((self.Pz.size, 3))
         self.points[:, 0] = Px.T.flatten()
@@ -1046,6 +1074,14 @@ class SurfaceBase(glcanvas.GLCanvas):
             colourAll.append(colour)
         return {'Vertices': vertexAll, 'Mesh': meshAll, 'Color': colourAll}
 
+    def SetGLObjects(self, globjects):
+        # set the globjects directly, see `PrepareGLObjects` for details about
+        # accepted keys
+        self.globjects = globjects
+        # clear the raw_points, so it will not conflict with globjects
+        self.raw_points = None
+        self.Refresh()
+
     def PrepareGLObjects(self):
         colorAll = []
         vertexAll = []
@@ -1075,9 +1111,8 @@ class SurfaceBase(glcanvas.GLCanvas):
         for k in range(1, len(blocks)):
             l, r = r, blocks[k]
             acolor = np.repeat(self.pointsClr[np.arange(
-                l, min(r + my + 1, len(P)))],
-                               4,
-                               axis=0)
+                               l, min(r + my + 1, len(P)))],
+                               4, axis=0)
             # for each point (x[i], y[j], z[i,j]), construct a quad
             # when show_step_surface is true
             # (x[i],   y[i],   z[i,j])
@@ -1253,12 +1288,12 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.DrawAxisHelp('z', vertex)
 
     def DrawAxisHelp(self, letter, vertex):
-        scale = self.GetContentScaleFactor()*self.scale['base']*self.scale['zoom']
+        scale = self.GetContentScaleFactor()*self.scale['base']
         W, H = int(32*scale), int(32*scale)
 
         mybuffer = self.DrawTextToBuffer(letter, (W, H), self.axistext_font,
                                          self.axistext_clr, align_center=True,
-                                         scale=2*self.scale['base']*self.scale['zoom'])
+                                         scale=2*self.scale['base'])
         texture = self.glTextures[0]
         glPixelStorei(GL_UNPACK_ALIGNMENT, GL_TRUE)
         glBindTexture(GL_TEXTURE_2D, texture)
@@ -1302,14 +1337,15 @@ class SurfaceBase(glcanvas.GLCanvas):
             for b in range(block):
                 self.SetGLBuffer(obj['Vertices'][b], obj['Color'][b])
                 clr_mesh = 0
-                if self.show['surface']:
+                if self.show['surface'] and 'Triangles' in obj:
                     # if surface is on, show the mesh in blue
                     clr_mesh = 1
                     self.DrawElement(GL_QUADS, obj['Triangles'][b], 0)
-                if self.show['mesh']:
+
+                if self.show['mesh'] and 'Mesh' in obj:
                     self.DrawElement(GL_LINES, obj['Mesh'][b], clr_mesh, 3)
 
-                if self.show['contour']:
+                if self.show['contour'] and 'Contour' in obj:
                     ctr = obj['Contour'][b]
                     for c in range(len(ctr['Vertices'])):
                         self.SetGLBuffer(ctr['Vertices'][c], ctr['Color'][c])
@@ -1439,8 +1475,10 @@ class SurfaceBase(glcanvas.GLCanvas):
         glUniform3f(vertexScaleData, 1, 1, self.data_zscale)
 
         vertexScale = glGetUniformLocation(self.ShaderProgram, "VertexScale")
-        scaleAll = self.scale['base'] * self.scale['zoom']
-        glUniform3f(vertexScale, scaleAll, scaleAll, 1)
+        scaleX = self.scale['base'] * self.scale['zoom_x']
+        scaleY = self.scale['base'] * self.scale['zoom_y']
+        scaleZ = self.scale['base']
+        glUniform3f(vertexScale, scaleX, scaleY, scaleZ)
 
         if self.mode_2d:
             self.Draw2dImg()
@@ -1487,7 +1525,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         return buffer
 
     def DrawHud(self):
-        if not self._hudtext and not self.hudtext:
+        if not self.show['hudtext'] or (not self._hudtext and not self.hudtext):
             return
         scale = self.GetContentScaleFactor()
         W, H = int(self.W*scale), int(self.H*scale)
@@ -1697,8 +1735,8 @@ class TrackingSurface(SurfaceBase):
             self.selected_buf.SetRange(rng)
 
     def UpdateHudText(self):
+        super().UpdateHudText()
         if self.frames is None or not self.frames.size:
-            self.hudtext = ""
             return
         _, rows, cols = self.frames.shape
         r = self.selected['y']
