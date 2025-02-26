@@ -119,12 +119,11 @@ class SimpleBarBuf(object):
     def SetData(self, d):
         if len(d) != self.buf_size:
             raise ValueError()
-        zmax = self.range['zmax']
         if self.horz:
-            ymax, ymin = self.range['ymax'], self.range['ymin']
+            ymax = self.range['ymax']
             self.vertex[:, 1] = ymax - (np.kron(d, [0, 1, 1, 0])).flatten()
         else:
-            xmax, xmin = self.range['xmax'], self.range['xmin']
+            xmax = self.range['xmax']
             self.vertex[:, 0] = xmax - (np.kron(d, [0, 1, 1, 0])).flatten()
 
 
@@ -486,7 +485,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         event.Skip()
 
     def _has_anything_to_draw(self):
-        return self.raw_points is not None or self.globjects
+        return self.raw_points is not None or (self.globjects is not None and bool(self.globjects))
 
     def OnPaint(self, event):
         dc = wx.PaintDC(self)
@@ -711,7 +710,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.Rotate(0, 0,
                     self.default_rotate / 180. * np.pi / self.rotate_delta)
 
-    def GetColorByZ(self, z, zmin=None, zmax=None):
+    def GetColorByZ(self, z, zmin=None, zmax=None, clr_map=None):
         zMin = zmin
         if zMin is None:
             zMin = self.range['zmin']
@@ -725,8 +724,9 @@ class SurfaceBase(glcanvas.GLCanvas):
         if len(self.color_scale) == 2:
             scale = self.color_scale[0]
             offset = self.color_scale[1]
-
-        C = self.color_map
+        C = clr_map
+        if C is None:
+            C = self.color_map
         norm_p = (z - zMin) * scale + offset
         norm_p = norm_p * len(self.color_map)
         norm_p = np.clip(norm_p, 0, len(self.color_map) - 1)
@@ -750,8 +750,7 @@ class SurfaceBase(glcanvas.GLCanvas):
         self.contour_levels = level
 
         # the objects will be re-generated before drawing
-        self.globject = None
-        self.Refresh()
+        self.Invalidate()
 
     def GetContourLevels(self):
         return self.contour_levels
@@ -1250,7 +1249,6 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def DrawAxis(self):
         r = self.range
-        scale = self.GetContentScaleFactor()
         g = 32 / self.scale['base']
         rng = max(r['xmax'] - r['xmin'], r['ymax'] - r['ymin'])
         rng_min = min(r['xmax'] - r['xmin'], r['ymax'] - r['ymin'])
@@ -1380,7 +1378,7 @@ class SurfaceBase(glcanvas.GLCanvas):
 
         xmax, xmin = self.range['xmax'], self.range['xmin']
         ymax, ymin = self.range['ymax'], self.range['ymin']
-        zmax, zmin = self.range['zmax'], self.range['zmin']
+        zmin = self.range['zmin']
         vertex = np.array([
             xmin, ymax, zmin, xmin, ymin, zmin, xmax, ymin, zmin, xmax, ymax,
             zmin
@@ -1891,7 +1889,9 @@ class TrackingSurface(SurfaceBase):
 
     def OnUpdateMenu(self, event):
         eid = event.GetId()
-        if eid == self.ID_DISP_ORIGINAL:
+        if eid == self.ID_AUTO_SCALE:
+            event.Enable(self.raw_points is not None)
+        elif eid == self.ID_DISP_ORIGINAL:
             event.Check(self.display_mode == self.DISPLAY_ORIGINAL)
         elif eid == self.ID_DISP_MAX:
             event.Check(self.display_mode == self.DISPLAY_MAX)
