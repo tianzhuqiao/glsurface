@@ -838,6 +838,13 @@ class SurfaceBase(glcanvas.GLCanvas):
 
     def SetSelected(self, sel):
         self.selected.update(sel)
+        if self.frames is not None:
+            r, c = self.selected['y'], self.selected['x']
+            _, rows, cols = self.frames.shape
+            if r >= 0 and c >= 0 and r < rows and c < cols:
+                data = self.frames[:, r, c]
+                self.selected_buf.buf = data
+
         self.UpdateHudText()
         self.Invalidate()
 
@@ -1637,7 +1644,7 @@ class SelectedPixelBuf(object):
 
     def InitVertex(self):
         # make z value larger than zmax, so it shows on top of the surface.
-        self.vertex = np.ones((self.buf_size, 3)) * self.range['zmax'] * 2.0
+        self.vertex = np.ones((self.buf_size, 3)) * self.range['zmax']
 
     def SetColor(self, clr, clr_sel=None):
         if self.line_color == clr and self.sel_color == clr_sel:
@@ -1843,13 +1850,20 @@ class TrackingSurface(SurfaceBase):
             return
         xmax, xmin = self.range['xmax'], self.range['xmin']
         ymax, ymin = self.range['ymax'], self.range['ymin']
+        zmax, zmin = self.range['zmax'], self.range['zmin']
+        zrange = zmax - zmin
+
         if self.default_rotate in [90, 270]:
             o = self.data_offset['y'] - self.data_offset['x']
             xmax, xmin, ymax, ymin = ymax - o, ymin - o, xmax, xmin
+        if zrange == 0:
+            g = 1
+        else:
+            g = (ymax-ymin)/(zmax-zmin)
         v, c, l = self.selected_buf.GetGLObject(
             xmin, xmax, ymin, ymax,
-            self.data_offset['z'] - self.data_offset['y'] / self.data_zscale,
-            self.data_zscale)
+            zmin,
+            g)
         if len(l) >= 2**16 - 10:
             # if the buffer length is larger, draw line with multiple sections
             for s in range(0, len(l), 2**16 - 10):
